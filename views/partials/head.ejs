@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title><%= title %> — BezReszty</title>
+<meta name="description" content="Zrzutki bez prowizji. Wspieraj dobre sprawy przelewem na telefon BLIK bezpośrednio do organizatora. Dobro w całości.">
+<meta name="theme-color" content="#075E54"><link rel="icon" type="image/svg+xml" href="/brand/mark.svg">
+<meta property="og:title" content="<%= title %> — BezReszty"><meta property="og:description" content="Dobro w całości. Zrzutki bez prowizji aplikacji."><meta property="og:type" content="website"><meta property="og:image" content="<%= config.baseUrl %>/brand/og.svg">
+<% if (typeof canonical !== 'undefined') { %><link rel="canonical" href="<%= canonical %>"><% } %>
+<link rel="stylesheet" href="/assets/style.css"><script src="/assets/app.js" defer></script>
+</head><body>
+<a class="skip" href="#main">Przejdź do treści</a>
+<% if (config.demo) { %><div class="demo-banner">Tryb demonstracyjny · fikcyjne zbiórki · prawdziwe wpłaty i rejestracja są wyłączone</div><% } %>
+<header class="site-header"><div class="shell header-inner">
+<a href="/" class="logo" aria-label="BezReszty — strona główna"><img src="/brand/mark.svg" width="37" height="37" alt="">BezReszty<span class="logo-dot">.</span></a>
+<nav aria-label="Nawigacja główna" class="desktop-nav"><a href="/zbiorki" <%- path === '/zbiorki' ? 'aria-current="page"' : '' %>>Odkryj zbiórki</a><a href="/jak-to-dziala">Jak to działa</a><a href="https://pomagasie.github.io">O projekcie ↗</a></nav>
+<div class="header-actions"><% if (user) { %><a class="plain-link" href="/panel">Mój panel</a><% if(user.role === 'admin') { %><a class="plain-link" href="/admin">Operator</a><% } %><% } else { %><a class="plain-link" href="/logowanie">Zaloguj się</a><% } %><a class="button small" href="<%= user ? '/panel/nowa-zbiorka' : '/rejestracja' %>">Załóż zbiórkę <span aria-hidden="true">↗</span></a><button class="mobile-toggle icon-button" type="button" aria-expanded="false" aria-controls="mobile-nav" aria-label="Otwórz menu">☰</button></div>
+</div><nav id="mobile-nav" class="mobile-nav" aria-label="Menu mobilne" hidden><a href="/zbiorki">Odkryj zbiórki</a><a href="/jak-to-dziala">Jak to działa</a><a href="https://pomagasie.github.io">O projekcie</a><a href="<%= user ? '/panel' : '/logowanie' %>"><%= user ? 'Mój panel' : 'Zaloguj się' %></a></nav></header>
+<% if (notice) { %><div class="shell"><p class="alert success" role="status"><%= notice %></p></div><% } %>
+<% if (error) { %><div class="shell"><p class="alert danger" role="alert"><%= error %></p></div><% } %>

@@ -22,7 +22,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   app.set('trust proxy', config.trustProxy);
   app.set('view engine', 'ejs');
   app.set('views', resolve('views'));
-  app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'"], imgSrc: ["'self'", 'data:'], fontSrc: ["'self'"], connectSrc: ["'self'"], formAction: ["'self'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.production ? [] : null } }, hsts: config.production ? undefined : false }));
+  app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'"], imgSrc: ["'self'", 'data:'], fontSrc: ["'self'"], connectSrc: ["'self'"], formAction: ["'self'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.production ? [] : null } }, referrerPolicy: { policy: 'same-origin' }, hsts: config.production ? undefined : false }));
   app.use('/assets', express.static(resolve('public'), { maxAge: '1h', etag: true }));
   app.use('/brand', express.static(resolve('brand'), { maxAge: '1h' }));
   app.post('/api/bank-mail', express.raw({ type: 'message/rfc822', limit: '256kb' }), async (req, res) => {

@@ -106,3 +106,12 @@ test('bank webhook requires fresh HMAC over exact raw bytes, persists rejection 
  assert.equal(db.prepare('SELECT COUNT(*) n FROM donations').get().n,0);
  assert.equal((await request(app).post('/api/bank-mail').set('Content-Type','message/rfc822').set('X-Bezreszty-Timestamp',ts).set('X-Bezreszty-Signature',sig).send(raw+'zmiana')).status,401);db.close();
 });
+test('same-origin forms send a real Origin header, so the Origin check accepts them',async()=>{
+ const {app,db,config}=setup();const agent=request.agent(app);
+ const page=await agent.get('/rejestracja');
+ // "no-referrer" makes browsers send "Origin: null" on same-origin POSTs, which the Origin check rejects
+ assert.equal(page.headers['referrer-policy'],'same-origin');
+ const _csrf=await csrf(agent,'/rejestracja');
+ const result=await agent.post('/rejestracja').set('Origin',config.baseUrl).type('form').send({_csrf,email:'origin@example.test',name:'Organizator Origin',password:'bezpieczne-haslo-123',accept:'on'});
+ assert.equal(result.status,302);db.close();
+});

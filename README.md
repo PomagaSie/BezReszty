@@ -7,6 +7,8 @@ BezReszty to otwarta aplikacja do prowadzenia zbiórek oparta na mechanizmie zna
 
 Organizator potrzebuje **darmowego konta w Alior Banku**, numeru telefonu zarejestrowanego do odbierania przelewów BLIK na ten rachunek oraz bankowych powiadomień wysyłanych na indywidualny adres e-mail z aplikacji. Wpłacający nie potrzebuje konta w BezReszty ani w Alior Banku.
 
+Jeśli BezReszty pomaga Ci pomagać, możesz dobrowolnie [postawić autorowi kawę ☕](https://suppi.pl/mleczakm) i wesprzeć rozwój projektu.
+
 ## Co działa
 
 - Publiczny katalog: wyszukiwanie, kategorie, strony zbiórek, postęp i potwierdzone wpłaty, udostępnianie.

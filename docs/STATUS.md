@@ -1,24 +1,21 @@
 # Stan wdrożenia
 
-Kod aplikacji, witryna organizacji, profil GitHub, branding i instrukcje samodzielnego hostowania są w tym repozytorium.
+Wdrożono 28 października 2026 (Europe/Warsaw).
 
-## Weryfikacja lokalna
+- Aplikacja: https://bezreszty.mleczki.pl — jeden kontener `bezreszty-app-1` na Wandzie192, status healthy; SQLite w trwałym wolumenie.
+- Strona projektu i organizacji: https://pomagasie.github.io — GitHub Pages, publikacja potwierdzona.
+- Profil organizacji: https://github.com/PomagaSie — repozytorium `.github` z `profile/README.md`.
+- Publiczny kod: https://github.com/PomagaSie/BezReszty, MIT, README z instrukcją samodzielnego hostowania.
+- Oddzielny Worker: `bezreszty-bank-mail`; reguła `wplaty@bezreszty.mleczki.pl`, subadresy `wplaty+<alias>@…`. Osobny sekret HMAC; własny backend. Konfiguracja Workera i reguł wykonywana w procesie deployu.
+- SMTP: `no-reply@bezreszty.mleczki.pl` na `outsider.mikr.us:465`. Poprawny TLS i uwierzytelnienie zweryfikowane. Konto bez dodatkowego limitu ustawionego przez aplikację; limity dostawcy pozostają po jego stronie.
+- SPF, publiczny DKIM z DirectAdmin i DMARC zapisane jako kod w `deploy/mail-dns.json`, zsynchronizowane przez cf. Bankowe powiadomienia nie wymagają skrzynki IMAP.
 
-- Testy kont, uprawnień, moderacji i rozliczania wpłat: `npm test`.
-- Kryptograficzny test DKIM z syntetycznym kluczem DNS, odrzucanie podmiany treści/odbiorcy i podpisów częściowych.
-- Kontrola składni JS/EJS: `npm run check`.
-- Audyt zależności produkcyjnych: `npm audit --omit=dev --audit-level=high`.
-- Widok strony głównej i zbiórki sprawdzony w przeglądarce lokalnej. Po odblokowaniu Maca można kontynuować końcową weryfikację mobilną.
+## Weryfikacja
 
-## Wymagane na docelowym serwerze
+20 testów obejmuje konta, uprawnienia, moderację, dokładne kwoty, izolację organizatorów, duplikaty, kryptograficzny DKIM, niepodpisane/podmienione wiadomości i HMAC Workera. Kontrola składni JS/EJS oraz oba audyty zależności przeszły. Obraz zbudowany i uruchomiony na Wandzie; CI GitHub zakończone sukcesem. Publiczne strony zwracają HTTP 200. Widoki aplikacji i strony PomagaSie sprawdzono w przeglądarce na desktopie i przy szerokości 390 px; brak poziomego przewijania.
 
-1. Serwer wskazany: Wanda192, jeden kontener aplikacji z SQLite. DNS/HTTPS i osobny Worker są zarządzane przez skrypt deployu.
-2. SMTP no-reply na Outsiderze oraz osobny Worker Email Routing. Skrzynka przychodząca nie jest wymagana.
-3. Prawdziwy test dostarczenia podpisanego powiadomienia Alior Banku na tę skrzynkę.
-4. Dane operatora instancji, procedura weryfikacji i retencja.
+Weryfikacja SMTP nie wysłała testowego e-maila do żadnej osoby. Pierwsza rejestracja potwierdzi rzeczywiste doręczenie. **Prawdziwy przelew i bankowe powiadomienie Aliora nie były wykonywane**; organizator musi przejść opisany test bankowy przed zatwierdzeniem konta i publikacją. Roli operatora nie otrzymuje się z formularza rejestracji — nadaje ją administrator serwera przez `scripts/admin.js` po potwierdzeniu adresu e-mail.
 
-Repozytorium nie zawiera haseł ani poświadczeń do banku. Przeszłe/pokazowe wpłaty w bazie demonstracyjnej nie są prawdziwymi darowiznami. Nie uznawaj publicznego wdrożenia aplikacji za wykonane na podstawie samego README lub obecności konfiguracji Compose.
+## Współpraca
 
-## Współpraca z Claude
-
-Claude przygotował koncepcję znaku „serce z pełnym obiegiem”, propozycje tekstów strony organizacji, FAQ i profilu GitHub. Codex wdrożył znak SVG i wybrane treści, zaprojektował stronę oraz aplikację, zaimplementował backend i testy. Nieaktywne środowisko Claude Code zastąpiono zwykłą rozmową, z której odebrano i przejrzano odpowiedź.
+Claude przygotował koncepcję znaku „serce z pełnym obiegiem” i propozycje treści strony, FAQ i profilu. Codex wdrożył znak i wybrane teksty, przygotował aplikację, layout, testy i wdrożenie. Więcej: `CLAUDE-HANDOFF.md`.

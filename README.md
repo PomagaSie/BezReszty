@@ -77,6 +77,8 @@ docker compose ps
 docker compose logs --tail=50 app
 ```
 
+Jeśli nie masz istniejącego HTTPS/proxy, uruchom dodatkowo opcjonalny Caddy: `docker compose -f compose.yaml -f deploy/compose.https.yaml up -d`. Na Wandzie aplikacja korzysta z istniejącego tunelu, a jedynym nowym kontenerem jest sama aplikacja.
+
 Skonfiguruj osobnego Workera i aliasy bankowych powiadomień według [MAIL.md](docs/MAIL.md). Zarejestruj zwykłe konto na swojej stronie, potwierdź e-mail i nadaj mu rolę operatora:
 
 ```sh

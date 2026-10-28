@@ -12,4 +12,6 @@ Organizator potrzebuje darmowego konta w Alior Banku, telefonu BLIK i powiadomie
 
 Możesz też **[uruchomić BezReszty na własnym serwerze](https://github.com/PomagaSie/BezReszty#uruchomienie-na-własnym-serwerze)**. Repozytorium zawiera instrukcję Docker Compose, konfigurację poczty i procedurę weryfikacji. Kod i autorskie materiały są na licencji MIT.
 
+Jeśli BezReszty pomaga Ci pomagać, możesz dobrowolnie [postawić autorowi kawę ☕](https://suppi.pl/mleczakm). Wsparcie jest niezależne od zbiórek.
+
 Projekt jest niezależny od Alior Banku i operatora BLIK. PomagaSie nie jest serwisem Siepomaga.

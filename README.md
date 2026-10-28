@@ -146,7 +146,7 @@ Konfiguracja docelowa znajduje się w `deploy/production.json`. `node scripts/de
 
 Sekrety pozostają w `/etc/bezreszty/runtime.env` (0600). Nie są w archiwum źródeł ani argumentach poleceń; plik sekretu Workera jest krótkotrwały i usuwany po wdrożeniu. Hasło SMTP nie jest resetowane w każdym deployu.
 
-`deploy.yml` pozwala wykonać ten sam proces ręcznie w GitHub Actions po dodaniu dedykowanego `DEPLOY_SSH_KEY`, zweryfikowanego `DEPLOY_SSH_KNOWN_HOSTS`, `CLOUDFLARE_API_TOKEN` i zmiennej `CLOUDFLARE_ACCOUNT_ID`. Nie kopiuj osobistego klucza SSH do CI.
+`deploy.yml` wykonuje ten sam proces automatycznie po każdym pushu na `main`, gdy przejdą „Application checks” (testy, audyt, build obrazu), a także ręcznie (Run workflow). Wymaga dedykowanego `DEPLOY_SSH_KEY`, zweryfikowanego `DEPLOY_SSH_KNOWN_HOSTS`, `CLOUDFLARE_API_TOKEN` i zmiennej `CLOUDFLARE_ACCOUNT_ID`. Nie kopiuj osobistego klucza SSH do CI.
 
 ### Outsider — własny adres nadawcy
 

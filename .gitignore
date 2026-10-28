@@ -9,3 +9,5 @@ data/
 coverage/
 playwright-report/
 test-results/
+.cloudflare/
+.dev.vars*

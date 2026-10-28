@@ -1,0 +1,9 @@
+import { backup } from 'node:sqlite';
+import { chmodSync, mkdirSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { readConfig } from '../src/config.js';
+import { openDatabase } from '../src/db.js';
+const config=readConfig(), db=openDatabase(config.dbPath);
+const target=resolve(process.argv[2] || `data/backups/bezreszty-${new Date().toISOString().replaceAll(':','-')}.sqlite`);
+mkdirSync(dirname(target),{recursive:true,mode:0o700});
+await backup(db,target);chmodSync(target,0o600);db.close();console.log(`Kopia bazy: ${target}`);

@@ -1,0 +1,24 @@
+name: Application checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix email-worker
+      - run: npm --prefix email-worker run build
+      - run: npm audit --prefix email-worker --audit-level=high
+      - run: npm run check
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+      - run: docker build -f deploy/Dockerfile -t bezreszty:test .

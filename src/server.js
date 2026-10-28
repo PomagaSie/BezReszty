@@ -4,6 +4,8 @@ import { createApp } from './app.js';
 import { syncMailbox } from './bank.js';
 const config = readConfig();
 const db = openDatabase(config.dbPath);
+const modes = db.prepare('SELECT DISTINCT is_demo FROM campaigns').all().map(row => row.is_demo);
+if (modes.some(mode => Boolean(mode) !== config.demo)) throw new Error('Baza zawiera dane z innego trybu. Użyj osobnej bazy dla demo i produkcji.');
 const server = createApp({ config, db }).listen(config.port, config.host, () => console.log(`BezReszty: ${config.baseUrl} (${config.demo ? 'demo — wpłaty wyłączone' : config.production ? 'production' : 'development'})`));
 let syncing = false;
 const sync = async () => {

@@ -1,0 +1,5 @@
+[
+  {"type":"TXT","name":"bezreszty.twojadomena.pl","content":"v=spf1 include:_spf.mx.cloudflare.net ip4:ADRES_SMTP_OD_DOSTAWCY ~all"},
+  {"type":"TXT","name":"x._domainkey.bezreszty.twojadomena.pl","content":"v=DKIM1; k=rsa; p=PUBLICZNY_KLUCZ_DKIM_Z_DIRECTADMIN"},
+  {"type":"TXT","name":"_dmarc.bezreszty.twojadomena.pl","content":"v=DMARC1; p=none"}
+]

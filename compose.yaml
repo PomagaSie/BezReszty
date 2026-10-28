@@ -1,0 +1,32 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    image: bezreszty:${BEZRESZTY_RELEASE:-local}
+    init: true
+    restart: unless-stopped
+    env_file: ${BEZRESZTY_ENV_FILE:-.env}
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DB_PATH: /app/data/bezreszty.sqlite
+      TRUST_PROXY: 1
+    volumes:
+      - app_data:/app/data
+    ports:
+      - '127.0.0.1:18089:3000'
+    read_only: true
+    tmpfs:
+      - /tmp:size=32M,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+volumes:
+  app_data:

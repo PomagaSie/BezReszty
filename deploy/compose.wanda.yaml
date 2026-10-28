@@ -1,0 +1,6 @@
+# Istniejący tunel mail-relay łączy się przez bramę Docker bridge.
+# Uruchom z: docker compose -f compose.yaml -f deploy/compose.wanda.yaml up -d --build
+services:
+  app:
+    ports:
+      - '172.17.0.1:18089:3000'

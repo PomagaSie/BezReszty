@@ -2,6 +2,9 @@ import { randomBytes, createHash, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from 'node:util';
 import { z } from 'zod';
 const scrypt = promisify(scryptCallback);
+export const todayWarsaw = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+export const verificationCode = user => `BR-KONTO-${user.id.replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+export const notificationAddress = (user, config) => `${config.notificationPrefix || ''}${user.notification_alias}@${config.notificationDomain}`;
 export const categories = { zdrowie: 'Zdrowie', zwierzeta: 'Zwierzęta', spolecznosc: 'Społeczność', edukacja: 'Edukacja', marzenia: 'Marzenia', pomoc: 'Pilna pomoc' };
 export const covers = ['community', 'nature', 'care', 'education', 'animals', 'dream'];
 export const token = (bytes = 32) => randomBytes(bytes).toString('hex');

@@ -1,0 +1,14 @@
+{
+  "host": "wanda192.mikrus.xyz",
+  "user": "root",
+  "port": 10192,
+  "root": "/opt/bezreszty",
+  "envFile": "/etc/bezreszty/runtime.env",
+  "domain": "bezreszty.mleczki.pl",
+  "zone": "mleczki.pl",
+  "notificationDomain": "bezreszty.mleczki.pl",
+  "notificationPrefix": "wplaty+",
+  "worker": "bezreszty-bank-mail",
+  "tunnelId": "5a663ac6-adf3-43ac-ba22-f992d17c7c0c",
+  "tunnelOrigin": "http://172.17.0.1:18089"
+}

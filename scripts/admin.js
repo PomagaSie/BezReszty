@@ -1,0 +1,10 @@
+import { readConfig } from '../src/config.js';
+import { openDatabase, audit } from '../src/db.js';
+const email = process.argv[2]?.trim().toLowerCase();
+if (!email) throw new Error('Użycie: npm run admin -- adres-istniejącego-konta@example.pl');
+const config=readConfig(), db=openDatabase(config.dbPath);
+const user=db.prepare('SELECT * FROM users WHERE email=?').get(email);
+if (!user || !user.email_verified) throw new Error('Najpierw zarejestruj konto w aplikacji i potwierdź e-mail.');
+db.prepare("UPDATE users SET role='admin' WHERE id=?").run(user.id);
+audit(db,null,'admin_granted_via_cli',user.id,'Nadano lokalnym poleceniem administratora serwera.');
+db.close();console.log('Nadano rolę operatora. Zaloguj się ponownie i otwórz /admin.');

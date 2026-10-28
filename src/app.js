@@ -2,18 +2,19 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { audit, now, transaction } from './db.js';
-import { categories, covers, money, token, hash, passwordHash, passwordMatches, registrationSchema, bankSchema, campaignSchema, toCents, slugify } from './domain.js';
+import { notificationAddress, verificationCode, todayWarsaw, categories, covers, money, token, hash, passwordHash, passwordMatches, registrationSchema, bankSchema, campaignSchema, toCents, slugify } from './domain.js';
 import { createMailer } from './email.js';
+import { authenticateBankMail, ingestAuthenticatedMail } from './bank.js';
 
-export const verificationCode = user => `BR-KONTO-${user.id.replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+export { verificationCode } from './domain.js';
 const sessionDuration = 1000 * 60 * 60 * 24 * 7;
-const safeEqual = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const safeEqual = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const aggregate = `SELECT c.*, u.name organizer, u.verification_status, COALESCE((SELECT SUM(amount) FROM donations d WHERE d.campaign_id=c.id AND d.status='confirmed'),0) raised, (SELECT COUNT(*) FROM donations d WHERE d.campaign_id=c.id AND d.status='confirmed') supporters FROM campaigns c JOIN users u ON u.id=c.owner_id`;
-const available = `c.status='published' AND u.verification_status='verified' AND (c.deadline IS NULL OR c.deadline='' OR c.deadline >= date('now'))`;
+const available = () => `c.status='published' AND u.verification_status='verified' AND (c.deadline IS NULL OR c.deadline='' OR c.deadline >= '${todayWarsaw()}')`;
 const statuses = { draft: 'Szkic', pending: 'Czeka na publikację', published: 'Opublikowana', closed: 'Zakończona', rejected: 'Wymaga poprawy' };
 export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   const app = express();
@@ -24,6 +25,19 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'"], imgSrc: ["'self'", 'data:'], fontSrc: ["'self'"], connectSrc: ["'self'"], formAction: ["'self'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.production ? [] : null } }, hsts: config.production ? undefined : false }));
   app.use('/assets', express.static(resolve('public'), { maxAge: '1h', etag: true }));
   app.use('/brand', express.static(resolve('brand'), { maxAge: '1h' }));
+  app.post('/api/bank-mail', express.raw({ type: 'message/rfc822', limit: '256kb' }), async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (!config.bankWebhookSecret || config.demo) return res.sendStatus(503);
+    const timestamp = req.get('x-bezreszty-timestamp') || '', signature = req.get('x-bezreszty-signature') || '';
+    if (!/^\d{13}$/.test(timestamp) || Math.abs(Date.now() - Number(timestamp)) > 300000 || !Buffer.isBuffer(req.body)) return res.sendStatus(401);
+    const expected = createHmac('sha256', config.bankWebhookSecret).update(timestamp + '\n').update(req.body).digest('hex');
+    if (!safeEqual(signature, expected)) return res.sendStatus(401);
+    const event = await authenticateBankMail(req.body, config);
+    if (event.rejected) {
+      db.prepare("INSERT OR IGNORE INTO bank_messages(id,fingerprint,status,reason,received_at) VALUES (?,?,'rejected',?,?)").run(randomUUID(), hash(req.body), event.rejected, now());
+    } else ingestAuthenticatedMail(db, config, event);
+    res.sendStatus(204);
+  });
   app.use(express.urlencoded({ extended: false, limit: '40kb' }));
   app.use(express.json({ limit: '10kb' }));
   app.use(cookieParser());
@@ -40,7 +54,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     const existing = req.cookies[csrfCookie];
     req.csrf = req.user?.csrf || (/^[a-f0-9]{64}$/.test(existing || '') ? existing : token());
     if (!req.user && req.csrf !== existing) res.cookie(csrfCookie, req.csrf, cookieOptions);
-    res.locals = { user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode };
+    res.locals = { user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode, notificationAddress };
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       if (req.get('origin') && req.get('origin') !== config.baseUrl) return res.status(403).render('error', { title: 'Niedozwolone żądanie', message: 'Otwórz formularz ponownie na tej stronie.' });
       if (!safeEqual(req.body?._csrf || req.get('x-csrf-token'), req.csrf)) return res.status(403).render('error', { title: 'Formularz wygasł', message: 'Odśwież stronę i spróbuj ponownie.' });
@@ -67,13 +81,13 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
 
   app.get('/healthz', (req, res) => { db.prepare('SELECT 1').get(); res.json({ status: 'ok' }); });
   app.get('/', (req, res) => {
-    const featured = db.prepare(`${aggregate} WHERE ${available} ORDER BY c.created_at DESC LIMIT 3`).all();
+    const featured = db.prepare(`${aggregate} WHERE ${available()} ORDER BY c.created_at DESC LIMIT 3`).all();
     res.render('home', { featured });
   });
   app.get('/zbiorki', (req, res) => {
     const search = String(req.query.q || '').slice(0, 100), category = String(req.query.kategoria || '');
-    const clauses = [available], params = [];
-    if (search) { clauses.push('(c.title LIKE ? OR c.summary LIKE ? OR c.location LIKE ?)'); params.push(...Array(3).fill(`%${search.replaceAll('%', '\\%').replaceAll('_', '\\_')}%`)); }
+    const clauses = [available()], params = [];
+    if (search) { clauses.push("(c.title LIKE ? ESCAPE '!' OR c.summary LIKE ? ESCAPE '!' OR c.location LIKE ? ESCAPE '!')"); params.push(...Array(3).fill(`%${search.replaceAll('!', '!!').replaceAll('%', '!%').replaceAll('_', '!_')}%`)); }
     if (category && category in categories) { clauses.push('c.category=?'); params.push(category); }
     const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.strona, 10) || 1));
     const count = db.prepare(`SELECT COUNT(*) total FROM campaigns c JOIN users u ON u.id=c.owner_id WHERE ${clauses.join(' AND ')}`).get(...params).total;
@@ -199,12 +213,12 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     const isOwner = campaign && (req.user?.id === campaign.owner_id || req.user?.role === 'admin');
     if (!campaign || (!['published', 'closed'].includes(campaign.status) && !isOwner) || (campaign.verification_status !== 'verified' && !isOwner)) return res.status(404).render('error', { title: 'Nie ma takiej zbiórki', message: 'Ta zbiórka nie jest dostępna. Zobacz inne dobre sprawy.' });
     const donations = db.prepare("SELECT name,message,amount,confirmed_at FROM donations WHERE campaign_id=? AND status='confirmed' ORDER BY confirmed_at DESC LIMIT 30").all(campaign.id);
-    const canDonate = campaign.status === 'published' && campaign.verification_status === 'verified' && (!campaign.deadline || campaign.deadline >= new Date().toISOString().slice(0, 10));
+    const canDonate = campaign.status === 'published' && campaign.verification_status === 'verified' && (!campaign.deadline || campaign.deadline >= todayWarsaw());
     res.render('campaign', { title: campaign.title, campaign, donations, canDonate, isOwner, canonical: `${config.baseUrl}/zbiorka/${campaign.slug}` });
   });
   app.post('/zbiorka/:slug/wesprzyj', donationLimit, (req, res) => {
     const campaign = campaignBySlug(req.params.slug);
-    if (!campaign || campaign.status !== 'published' || campaign.verification_status !== 'verified' || (campaign.deadline && campaign.deadline < new Date().toISOString().slice(0, 10))) return res.status(409).render('error', { title: 'Wpłaty są zamknięte', message: 'Ta zbiórka nie przyjmuje nowych wpłat.' });
+    if (!campaign || campaign.status !== 'published' || campaign.verification_status !== 'verified' || (campaign.deadline && campaign.deadline < todayWarsaw())) return res.status(409).render('error', { title: 'Wpłaty są zamknięte', message: 'Ta zbiórka nie przyjmuje nowych wpłat.' });
     if (config.demo || campaign.is_demo) return res.status(409).render('error', { title: 'To zbiórka pokazowa', message: 'Nie wykonuj przelewu. Demo pokazuje działanie aplikacji i nie zbiera pieniędzy.' });
     try {
       const amount = toCents(req.body.amount);
@@ -262,6 +276,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   app.use((req, res) => res.status(404).render('error', { title: 'Ta strona gdzieś się zapodziała', message: 'Sprawdź adres lub wróć do zbiórek.' }));
   app.use((error, req, res, next) => {
     if (res.headersSent) return next(error);
+    if (req.path === '/api/bank-mail') return res.sendStatus(error.status === 413 ? 413 : 503);
     console.error('Request failed:', error.code || error.name);
     res.status(error.status === 413 ? 413 : 500).render('error', { title: 'Nie udało się dokończyć operacji', message: 'Spróbuj ponownie za chwilę. Jeśli problem się powtarza, skontaktuj się z operatorem.' });
   });

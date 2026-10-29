@@ -31,12 +31,38 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          missing=()
+          [ -n "$SSH_KEY" ] || missing+=('secret DEPLOY_SSH_KEY')
+          [ -n "$KNOWN_HOSTS" ] || missing+=('secret DEPLOY_SSH_KNOWN_HOSTS')
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=('secret CLOUDFLARE_API_TOKEN')
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=('variable CLOUDFLARE_ACCOUNT_ID')
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error title=Brak konfiguracji wdrożenia::Ustaw w Settings → Environments → production: ${missing[*]}"
+            exit 1
+          fi
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
-      - run: node scripts/deploy.mjs
+      - name: Check SSH access to the production server
+        run: |
+          host=$(node -p "require('./deploy/production.json').host")
+          port=$(node -p "require('./deploy/production.json').port")
+          user=$(node -p "require('./deploy/production.json').user")
+          if ! out=$(ssh -o BatchMode=yes -o ConnectTimeout=15 -p "$port" "$user@$host" true 2>&1); then
+            echo "::error title=SSH do $user@$host:$port nie działa::$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-600) — known_hosts musi zawierać wpis [$host]:$port"
+            exit 1
+          fi
+      - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          if ! node scripts/deploy.mjs 2>&1 | tee "$RUNNER_TEMP/deploy.log"; then
+            echo "::error title=Wdrożenie nie powiodło się::$(grep -v '^\s*$' "$RUNNER_TEMP/deploy.log" | tail -n 12 | tr '\n' ' ' | cut -c1-900)"
+            exit 1
+          fi

@@ -45,13 +45,30 @@ try {
  if(!own)ingress.splice(Math.max(0,ingress.length-1),0,{hostname:config.domain,service:config.tunnelOrigin});
  else if(own.service!==config.tunnelOrigin)throw new Error('Istniejąca reguła tunelu wskazuje inne origin. Sprawdź konfigurację.');
  if(!own)cf(['tunnels','config','update',config.tunnelId,'--body',JSON.stringify({config:{...tunnel.config,ingress}})]);
+ const aliases=config.legacyDomains || [];
+ if(aliases.some(hostname=>!ingress.some(rule=>rule.hostname===hostname))){
+  for(const hostname of aliases){
+   if(!/^[a-z0-9.-]+$/.test(hostname))throw new Error('Nieprawidłowa domena przekierowania.');
+   if(!ingress.some(rule=>rule.hostname===hostname))ingress.splice(Math.max(0,ingress.length-1),0,{hostname,service:config.tunnelOrigin});
+  }
+  cf(['tunnels','config','update',config.tunnelId,'--body',JSON.stringify({config:{...tunnel.config,ingress}})]);
+ }
+ for(const hostname of aliases.filter(host=>host.endsWith('.'+config.zone))){
+  const existing=json(['dns','records','list','-z',config.zone,'--name',hostname]).filter(record=>['A','AAAA','CNAME'].includes(record.type));
+  if(!existing.length)cf(['dns','records','create','-z',config.zone,'--body',JSON.stringify({type:'CNAME',name:hostname,content:`${config.tunnelId}.cfargotunnel.com`,proxied:true,ttl:1})]);
+  else if(existing.length!==1||existing[0].type!=='CNAME'||existing[0].content!==`${config.tunnelId}.cfargotunnel.com`)throw new Error('Alias ma inny rekord DNS — nie nadpisano go.');
+ }
  const records=json(['dns','records','list','-z',config.zone,'--name',config.domain]).filter(record=>['A','AAAA','CNAME'].includes(record.type));
  const target=`${config.tunnelId}.cfargotunnel.com`;
  if(!records.length)cf(['dns','records','create','-z',config.zone,'--body',JSON.stringify({type:'CNAME',name:config.domain,content:target,proxied:true,ttl:1,comment:'BezReszty — wdrożenie aplikacji'})]);
  else if(records.length!==1||records[0].type!=='CNAME'||records[0].content!==target)throw new Error('Domena ma inny rekord — nie nadpisano go.');
  const routing=json(['email-routing','settings','get','-z',config.zone]);
- if(!routing.subdomains?.some(domain=>domain.name===config.notificationDomain))cf(['email-routing','enable','-z',config.zone,'--name',config.notificationDomain]);
- if(!routing.support_subaddress)throw new Error('Email Routing wymaga support_subaddress=true. Ustaw je świadomie dla tej strefy przed wdrożeniem.');
+ const configuredDomain=config.notificationDomain===config.zone ? routing.enabled : routing.subdomains?.some(domain=>domain.name===config.notificationDomain && domain.enabled);
+ if(!configuredDomain)cf(['email-routing','enable','-z',config.zone,...(config.notificationDomain===config.zone ? [] : ['--name',config.notificationDomain])]);
+ if(!routing.support_subaddress){
+  if(config.enableSubaddressing && config.notificationDomain===config.zone)cf(['email-routing','settings','apply','-z',config.zone,'--support-subaddress']);
+  else throw new Error('Email Routing wymaga support_subaddress=true. Ustaw je świadomie dla tej strefy przed wdrożeniem.');
+ }
  if(existsSync(resolve(root,'deploy/mail-dns.json')))run(process.execPath,['scripts/sync-mail-dns.mjs']);
  console.log('Wdrożenie odseparowanego Workera bankowych powiadomień.');
  cf(['deploy','--secrets-file',secretsFile]);

@@ -33,6 +33,12 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   app.set('view engine', 'ejs');
   app.set('views', resolve('views'));
   app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'"], imgSrc: ["'self'", 'data:'], fontSrc: ["'self'"], connectSrc: ["'self'"], formAction: ["'self'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.production ? [] : null } }, referrerPolicy: { policy: 'same-origin' }, hsts: config.production ? undefined : false }));
+  app.use((req, res, next) => {
+    if (!(config.legacyDomains || []).includes(req.hostname.toLowerCase())) return next();
+    res.set('Cache-Control', 'no-store');
+    if (['GET', 'HEAD'].includes(req.method)) return res.redirect(308, config.baseUrl + req.originalUrl);
+    return res.status(409).type('text').send(`Adres aplikacji został zmieniony. Otwórz ${config.baseUrl} i ponów operację.`);
+  });
   app.use('/assets', express.static(resolve('public'), { maxAge: '1h', etag: true }));
   app.use('/brand', express.static(resolve('brand'), { maxAge: '1h' }));
   app.post('/api/bank-mail', express.raw({ type: 'message/rfc822', limit: '256kb' }), async (req, res) => {

@@ -4,11 +4,16 @@
   "port": 10192,
   "root": "/opt/bezreszty",
   "envFile": "/etc/bezreszty/runtime.env",
-  "domain": "bezreszty.mleczki.pl",
-  "zone": "mleczki.pl",
-  "notificationDomain": "bezreszty.mleczki.pl",
+  "domain": "bezreszty.org.pl",
+  "zone": "bezreszty.org.pl",
+  "notificationDomain": "bezreszty.org.pl",
   "notificationPrefix": "wplaty+",
   "worker": "bezreszty-bank-mail",
   "tunnelId": "5a663ac6-adf3-43ac-ba22-f992d17c7c0c",
-  "tunnelOrigin": "http://172.17.0.1:18089"
+  "tunnelOrigin": "http://172.17.0.1:18089",
+  "enableSubaddressing": true,
+  "legacyDomains": [
+    "bezreszty.mleczki.pl",
+    "www.bezreszty.org.pl"
+  ]
 }

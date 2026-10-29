@@ -121,3 +121,13 @@ test('static assets are referenced with a content-hash version so deploys bust b
  assert.match(page.text,/src="\/brand\/mark\.svg\?v=[a-f0-9]{10}"/);
  assert.equal((await request(app).get(css[1])).status,200);db.close();
 });
+
+test('domain migration preserves paths and query strings and never replays an old-domain POST',async()=>{
+ const {app,db}=setup({baseUrl:'https://bezreszty.org.pl',legacyDomains:['bezreszty.mleczki.pl','www.bezreszty.org.pl']});
+ for(const host of ['bezreszty.mleczki.pl','www.bezreszty.org.pl']){
+  const response=await request(app).get('/zbiorki?q=ogrod&kategoria=spolecznosc').set('Host',host);
+  assert.equal(response.status,308);assert.equal(response.headers.location,'https://bezreszty.org.pl/zbiorki?q=ogrod&kategoria=spolecznosc');
+ }
+ assert.equal((await request(app).post('/logowanie').set('Host','bezreszty.mleczki.pl').send({password:'unused'})).status,409);
+ assert.equal((await request(app).get('/healthz').set('Host','bezreszty.org.pl')).status,200);db.close();
+});

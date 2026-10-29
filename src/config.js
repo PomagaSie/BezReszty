@@ -11,7 +11,7 @@ export function readConfig(env = process.env) {
     throw new Error('Produkcja wymaga SMTP lub relay, IMAP lub webhooka, domeny powiadomień i danych operatora. Sprawdź .env.example.');
   }
   return {
-    production, demo, baseUrl, port: Number(env.PORT || 3000),
+    production, demo, baseUrl, legacyDomains: (env.LEGACY_DOMAINS || '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean), port: Number(env.PORT || 3000),
     host: env.HOST || '127.0.0.1', dbPath: env.DB_PATH || resolve('data/bezreszty.sqlite'),
     notificationPrefix: env.NOTIFICATION_PREFIX || '',
     bankWebhookSecret: env.BANK_WEBHOOK_SECRET || '',

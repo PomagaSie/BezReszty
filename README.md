@@ -1,7 +1,7 @@
 <p align="center"><img src="brand/logo.svg" alt="BezReszty" width="330"></p>
 <h3 align="center">Dobro w całości.</h3>
 <p align="center">Zrzutki bez prowizji aplikacji. Pieniądze bezpośrednio do organizatora.</p>
-<p align="center"><a href="https://bezreszty.mleczki.pl">Aplikacja</a> · <a href="https://pomagasie.github.io">O projekcie PomagaSie</a> · <a href="#uruchomienie-na-własnym-serwerze">Uruchom u siebie</a></p>
+<p align="center"><a href="https://bezreszty.org.pl">Aplikacja</a> · <a href="https://pomagasie.github.io">O projekcie PomagaSie</a> · <a href="#uruchomienie-na-własnym-serwerze">Uruchom u siebie</a></p>
 
 BezReszty to otwarta aplikacja do prowadzenia zbiórek oparta na mechanizmie znanym z [ClassyCash](https://github.com/classy-cash/app): przelew na telefon BLIK z unikalnym tytułem i dopasowanie powiadomienia o uznaniu rachunku Alior Banku. Nie integrujemy terminala BLIK ani płatności sześciocyfrowym kodem. Nie przechowujemy środków.
 
@@ -141,7 +141,7 @@ Konfiguracja docelowa znajduje się w `deploy/production.json`. `node scripts/de
 2. Buduje i uruchamia jeden kontener na Wandzie, zachowując wolumen SQLite.
 3. Dodaje wyłącznie hostname aplikacji do istniejącego tunelu i ustawia jej CNAME.
 4. Włącza routing tylko dla subdomeny BezReszty, zachowując MX domeny głównej.
-5. Buduje i wdraża **odrębnego** Workera `bezreszty-bank-mail`, podaje mu osobny sekret HMAC i tworzy regułę `wplaty@bezreszty.mleczki.pl` (z subadresowaniem).
+5. Buduje i wdraża **odrębnego** Workera `bezreszty-bank-mail`, podaje mu osobny sekret HMAC i tworzy regułę `wplaty@bezreszty.org.pl` (z subadresowaniem).
 6. Synchronizuje publiczne SPF/DKIM/DMARC z `deploy/mail-dns.json`, jeśli plik istnieje, i sprawdza publiczne `/healthz`.
 
 Sekrety pozostają w `/etc/bezreszty/runtime.env` (0600). Nie są w archiwum źródeł ani argumentach poleceń; plik sekretu Workera jest krótkotrwały i usuwany po wdrożeniu. Hasło SMTP nie jest resetowane w każdym deployu.
@@ -150,6 +150,6 @@ Sekrety pozostają w `/etc/bezreszty/runtime.env` (0600). Nie są w archiwum źr
 
 ### Outsider — własny adres nadawcy
 
-Domena `bezreszty.mleczki.pl` na Outsiderze i konto `no-reply` służą wyłącznie SMTP. MX pozostają przy Cloudflare, więc nie potrzebujesz dodatkowych skrzynek przychodzących. `scripts/provision-outsider.mjs` potrafi idempotentnie dodać domenę i konto przez API DirectAdmin (z kluczem ograniczonym do domen i poczty). Wymaga zmiennych `DIRECTADMIN_USER`, `DIRECTADMIN_KEY` i `BEZRESZTY_ENV_FILE`; nie przyjmuje sekretów w argumentach i nie zmienia istniejącego hasła. Uprawnienia i rzeczywiste SPF/DKIM sprawdź u dostawcy. Dla instalacji bez klucza API konto można jednorazowo utworzyć w panelu.
+Domena `bezreszty.org.pl` na Outsiderze i konto `no-reply` służą wyłącznie SMTP. MX pozostają przy Cloudflare, więc nie potrzebujesz dodatkowych skrzynek przychodzących. `scripts/provision-outsider.mjs` potrafi idempotentnie dodać domenę i konto przez API DirectAdmin (z kluczem ograniczonym do domen i poczty). Wymaga zmiennych `DIRECTADMIN_USER`, `DIRECTADMIN_KEY` i `BEZRESZTY_ENV_FILE`; nie przyjmuje sekretów w argumentach i nie zmienia istniejącego hasła. Uprawnienia i rzeczywiste SPF/DKIM sprawdź u dostawcy. Dla instalacji bez klucza API konto można jednorazowo utworzyć w panelu.
 
 Po włączeniu DKIM pobierz publiczne rekordy domeny z panelu. Zapisz je w `deploy/mail-dns.json` według przykładu; `scripts/sync-mail-dns.mjs` i proces deployu utworzą lub zaktualizują je przez **cf CLI**. Skrypt DNS nie usuwa MX ani innych domen.

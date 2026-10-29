@@ -2,13 +2,13 @@
 
 Wdrożono 28 października 2026 (Europe/Warsaw).
 
-- Aplikacja: https://bezreszty.mleczki.pl — jeden kontener `bezreszty-app-1` na Wandzie192, status healthy; SQLite w trwałym wolumenie.
+- Aplikacja: https://bezreszty.org.pl — jeden kontener `bezreszty-app-1` na Wandzie192, status healthy; SQLite w trwałym wolumenie.
 - Strona projektu i organizacji: https://pomagasie.github.io — GitHub Pages, publikacja potwierdzona.
 - Profil organizacji: https://github.com/PomagaSie — repozytorium `.github` z `profile/README.md`.
 - Publiczny kod: https://github.com/PomagaSie/BezReszty, MIT, README z instrukcją samodzielnego hostowania.
-- Oddzielny Worker: `bezreszty-bank-mail`; reguła `wplaty@bezreszty.mleczki.pl`, subadresy `wplaty+<alias>@…`. Osobny sekret HMAC; własny backend. Konfiguracja Workera i reguł wykonywana w procesie deployu.
-- SMTP: `no-reply@bezreszty.mleczki.pl` na `outsider.mikr.us:465`. Poprawny TLS i uwierzytelnienie zweryfikowane. Konto bez dodatkowego limitu ustawionego przez aplikację; limity dostawcy pozostają po jego stronie.
-- SPF, publiczny DKIM z DirectAdmin i DMARC (`p=quarantine`, wszystkie trzy przechodzą z wyrównaniem do `bezreszty.mleczki.pl`) zapisane jako kod w `deploy/mail-dns.json`, zsynchronizowane przez cf. Bankowe powiadomienia nie wymagają skrzynki IMAP.
+- Oddzielny Worker: `bezreszty-bank-mail`; reguła `wplaty@bezreszty.org.pl`, subadresy `wplaty+<alias>@…`. Osobny sekret HMAC; własny backend. Konfiguracja Workera i reguł wykonywana w procesie deployu.
+- SMTP: `no-reply@bezreszty.org.pl` na `outsider.mikr.us:465`. Poprawny TLS i uwierzytelnienie zweryfikowane. Konto bez dodatkowego limitu ustawionego przez aplikację; limity dostawcy pozostają po jego stronie.
+- SPF, publiczny DKIM z DirectAdmin i DMARC (`p=quarantine`, wszystkie trzy przechodzą z wyrównaniem do `bezreszty.org.pl`) zapisane jako kod w `deploy/mail-dns.json`, zsynchronizowane przez cf. Bankowe powiadomienia nie wymagają skrzynki IMAP.
 
 ## Weryfikacja
 

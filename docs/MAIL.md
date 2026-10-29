@@ -10,14 +10,14 @@ Aplikacja nie inicjuje przelewu i nie ma dostępu do bankowości użytkownika. N
 
 W produkcji BezReszty powiadomienia odbiera odseparowany Worker `bezreszty-bank-mail` z katalogu `email-worker/`. Aplikacja i SQLite pozostają w jednym kontenerze na Wandzie. Worker nie korzysta z parsera ani endpointu ClassyCash.
 
-- Domena pocztowa: `bezreszty.mleczki.pl`; MX kierują na Cloudflare Email Routing.
-- Jedna reguła literalna `wplaty@bezreszty.mleczki.pl` i aktywne subadresowanie obsługują `wplaty+<losowy-alias>@bezreszty.mleczki.pl` każdego organizatora.
+- Domena pocztowa: `bezreszty.org.pl`; MX kierują na Cloudflare Email Routing.
+- Jedna reguła literalna `wplaty@bezreszty.org.pl` i aktywne subadresowanie obsługują `wplaty+<losowy-alias>@bezreszty.org.pl` każdego organizatora.
 - Worker przesyła do `POST /api/bank-mail` surowy RFC822 (do 256 KiB) z HMAC-SHA256 po `timestamp + "\n" + raw`. Nagłówki: `X-Bezreszty-Timestamp` i `X-Bezreszty-Signature`. Okno podpisu: 5 minut.
 - Aplikacja weryfikuje HMAC, a następnie niezależnie prawdziwy podpis DKIM banku i całą zgodność rachunku/referencji/kwoty. Samo wysłanie żądania przez Workera nie potwierdza wpłaty.
 - Konfiguracja, build, sekret HMAC i reguła Worker są częścią `scripts/deploy.mjs`. Sekret różni się od pozostałych aplikacji.
 - Worker nie loguje adresów, treści ani kwot. Błędna odpowiedź backendu powoduje błąd przetwarzania poczty; nie potwierdza doręczenia przed trwałym zapisem zdarzenia.
 
-Nadawca `no-reply@bezreszty.mleczki.pl` jest odrębnym kontem **SMTP** na Outsiderze. Nie potrzebujemy skrzynki bankowych powiadomień, catch-all w IMAP ani dostępu do prywatnej poczty.
+Nadawca `no-reply@bezreszty.org.pl` jest odrębnym kontem **SMTP** na Outsiderze. Nie potrzebujemy skrzynki bankowych powiadomień, catch-all w IMAP ani dostępu do prywatnej poczty.
 
 ## Alternatywny wariant: IMAP
 

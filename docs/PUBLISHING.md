@@ -17,4 +17,4 @@ W publicznym repozytorium **PomagaSie/.github** umieść `organisation/profile/R
 
 ## Aplikacja
 
-GitHub Pages obsługuje stronę informacyjną. Aplikacja z sesjami, SQLite i IMAP potrzebuje serwera Node.js/Docker opisanego w README. Dla `bezreszty.mleczki.pl` ustaw domenę, HTTPS i pocztę na docelowym serwerze; publikacja strony GitHub Pages nie uruchamia backendu.
+GitHub Pages obsługuje stronę informacyjną. Aplikacja z sesjami, SQLite i IMAP potrzebuje serwera Node.js/Docker opisanego w README. Dla `bezreszty.org.pl` ustaw domenę, HTTPS i pocztę na docelowym serwerze; publikacja strony GitHub Pages nie uruchamia backendu.

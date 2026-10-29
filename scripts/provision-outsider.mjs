@@ -4,7 +4,7 @@ import { readFileSync,writeFileSync,existsSync,mkdirSync,renameSync,chmodSync } 
 import { dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 const endpoint=process.env.DIRECTADMIN_URL || 'https://outsider.mikr.us:2222';
-const domain=process.env.MAIL_DOMAIN || 'bezreszty.mleczki.pl';
+const domain=process.env.MAIL_DOMAIN || 'bezreszty.org.pl';
 const user=process.env.DIRECTADMIN_USER,key=process.env.DIRECTADMIN_KEY;
 const runtime=process.env.BEZRESZTY_ENV_FILE;
 if(!user||!key||!runtime)throw new Error('Wymagane DIRECTADMIN_USER, DIRECTADMIN_KEY i BEZRESZTY_ENV_FILE. Sekretów nie przekazuj argumentami.');

@@ -1,5 +1,5 @@
 [
   {"type":"TXT","name":"bezreszty.mleczki.pl","content":"v=spf1 ip4:95.217.59.141 ip6:2a01:4f9:4a:1384::2 include:_spf.mx.cloudflare.net ~all"},
   {"type":"TXT","name":"x._domainkey.bezreszty.mleczki.pl","content":"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2TplKBj0/xXPzyFVnVC4o2eCdy7ZFjG0TAckpZJx3vbafZUJ3x699RlpYFPuUYoogsIqxFDz/GggliqgnBqQt01fn7lQFocsnEiQbl/UuhVg5fu48TkdI6LX5IXYyksJl7EoD5NhWdp5ul8zkJm7PuIuj0lolKINDoiBfblyCMpjecLoISATi+KU5XLVs6oXNbc0KB1hgdgoRuUuhi0UZhh4WDw4OKKCeLIQuNekJoxaZkHXlB7/HPh8VyhaaBiouD3l2mlA6h4wDz6bCq+U99bk6Qb47RF8sqGxR8KjptlYMd8mRzYiKRnqkneFCSXi7ul4EPF1YmI6ccJMYA6vKwIDAQAB"},
-  {"type":"TXT","name":"_dmarc.bezreszty.mleczki.pl","content":"v=DMARC1; p=none"}
+  {"type":"TXT","name":"_dmarc.bezreszty.mleczki.pl","content":"v=DMARC1; p=quarantine; sp=quarantine; adkim=r; aspf=r; pct=100"}
 ]

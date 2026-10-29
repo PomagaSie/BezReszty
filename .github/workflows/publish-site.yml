@@ -1,0 +1,25 @@
+name: Publish PomagaSie site
+# website/ is the source of pomagasie.github.io. On every push to main that changes it, ask
+# PomagaSie/pomagasie.github.io to sync and rebuild. Needs secret SITE_DISPATCH_TOKEN: a
+# fine-grained token for that one repo with "Contents: Read and write". Without it the site
+# repo still syncs itself every 30 minutes.
+on:
+  push:
+    branches: [main]
+    paths: ['website/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger site sync
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice title=Strona PomagaSie::Brak SITE_DISPATCH_TOKEN — strona zsynchronizuje się sama w ciągu 30 minut."
+            exit 0
+          fi
+          gh api --method POST repos/PomagaSie/pomagasie.github.io/dispatches -f event_type=bezreszty-website

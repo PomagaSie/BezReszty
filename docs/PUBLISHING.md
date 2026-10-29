@@ -4,21 +4,12 @@
 
 ## Strona organizacji
 
-W publicznym repozytorium **PomagaSie/pomagasie.github.io** umieść zawartość `website/` w katalogu głównym, zachowując pliki assets i `.nojekyll`. Włącz GitHub Pages dla gałęzi `main`, katalog `/`.
+Repozytorium **PomagaSie/pomagasie.github.io** serwuje stronę z gałęzi `main`. Nie edytuj go ręcznie: jego workflow `sync-from-bezreszty.yml` kopiuje `website/` z tego repozytorium, wersjonuje `style.css` i `script.js` skrótem zawartości i przebudowuje Pages.
 
-Przykład, gdy repozytorium jeszcze nie istnieje:
-
-```sh
-gh repo create PomagaSie/pomagasie.github.io --public --description 'PomagaSie — otwarte narzędzia pomagania. Poznaj BezReszty.'
-git clone git@github.com:PomagaSie/pomagasie.github.io.git /tmp/pomagasie-site
-cp -R website/. /tmp/pomagasie-site/
-git -C /tmp/pomagasie-site add .
-git -C /tmp/pomagasie-site commit -m 'Publish PomagaSie and BezReszty project site'
-git -C /tmp/pomagasie-site push origin main
-gh api --method POST repos/PomagaSie/pomagasie.github.io/pages -f 'source[branch]=main' -f 'source[path]=/'
-```
-
-Przy aktualizacji skopiuj tylko pliki źródłowe strony, bez `.git`, sekretów czy konfiguracji wdrożenia innego repozytorium. `website/` pozostaje wersjonowanym źródłem w repo aplikacji.
+Synchronizacja uruchamia się:
+- po każdym pushu na `main`, który zmienia `website/` (workflow `publish-site.yml`, wymaga sekretu `SITE_DISPATCH_TOKEN`: fine-grained token tylko do `PomagaSie/pomagasie.github.io` z uprawnieniem Contents: Read and write),
+- co 30 minut jako zabezpieczenie,
+- ręcznie (Actions → „Sync site from BezReszty” → Run workflow).
 
 ## Profil organizacji
 

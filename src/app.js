@@ -2,8 +2,9 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
-import { randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
-import { resolve } from 'node:path';
+import { randomUUID, timingSafeEqual, createHmac, createHash } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { z } from 'zod';
 import { audit, now, transaction } from './db.js';
 import { notificationAddress, verificationCode, todayWarsaw, categories, covers, money, token, hash, passwordHash, passwordMatches, registrationSchema, bankSchema, campaignSchema, toCents, slugify } from './domain.js';
@@ -16,6 +17,15 @@ const safeEqual = (a, b) => typeof a === 'string' && typeof b === 'string' && Bu
 const aggregate = `SELECT c.*, u.name organizer, u.verification_status, COALESCE((SELECT SUM(amount) FROM donations d WHERE d.campaign_id=c.id AND d.status='confirmed'),0) raised, (SELECT COUNT(*) FROM donations d WHERE d.campaign_id=c.id AND d.status='confirmed') supporters FROM campaigns c JOIN users u ON u.id=c.owner_id`;
 const available = () => `c.status='published' AND u.verification_status='verified' AND (c.deadline IS NULL OR c.deadline='' OR c.deadline >= '${todayWarsaw()}')`;
 const statuses = { draft: 'Szkic', pending: 'Czeka na publikację', published: 'Opublikowana', closed: 'Zakończona', rejected: 'Wymaga poprawy' };
+// Content hash of every static asset: changes on each deploy that touches CSS, JS, images or brand files,
+// so browsers fetch the new versions instead of serving a stale cached stylesheet next to new HTML.
+const assetVersion = (() => {
+  const digest = createHash('sha256');
+  const walk = dir => { for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const path = join(dir, entry.name); if (entry.isDirectory()) walk(path); else digest.update(path).update(readFileSync(path)); } };
+  for (const dir of ['public', 'brand']) walk(resolve(dir));
+  return digest.digest('hex').slice(0, 10);
+})();
+const asset = path => `${path}?v=${assetVersion}`;
 export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   const app = express();
   app.disable('x-powered-by');
@@ -54,7 +64,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     const existing = req.cookies[csrfCookie];
     req.csrf = req.user?.csrf || (/^[a-f0-9]{64}$/.test(existing || '') ? existing : token());
     if (!req.user && req.csrf !== existing) res.cookie(csrfCookie, req.csrf, cookieOptions);
-    res.locals = { user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode, notificationAddress };
+    res.locals = { asset, user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode, notificationAddress };
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       if (req.get('origin') && req.get('origin') !== config.baseUrl) return res.status(403).render('error', { title: 'Niedozwolone żądanie', message: 'Otwórz formularz ponownie na tej stronie.' });
       if (!safeEqual(req.body?._csrf || req.get('x-csrf-token'), req.csrf)) return res.status(403).render('error', { title: 'Formularz wygasł', message: 'Odśwież stronę i spróbuj ponownie.' });

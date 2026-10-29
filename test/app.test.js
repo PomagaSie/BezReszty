@@ -115,3 +115,9 @@ test('same-origin forms send a real Origin header, so the Origin check accepts t
  const result=await agent.post('/rejestracja').set('Origin',config.baseUrl).type('form').send({_csrf,email:'origin@example.test',name:'Organizator Origin',password:'bezpieczne-haslo-123',accept:'on'});
  assert.equal(result.status,302);db.close();
 });
+test('static assets are referenced with a content-hash version so deploys bust browser caches',async()=>{
+ const {app,db}=setup();const page=await request(app).get('/');
+ const css=page.text.match(/href="(\/assets\/style\.css\?v=[a-f0-9]{10})"/);assert.ok(css,'versioned stylesheet');
+ assert.match(page.text,/src="\/brand\/mark\.svg\?v=[a-f0-9]{10}"/);
+ assert.equal((await request(app).get(css[1])).status,200);db.close();
+});

@@ -16,7 +16,8 @@
     "mail:sync": "node --env-file-if-exists=.env scripts/mail-sync.js",
     "demo:seed": "node --env-file-if-exists=.env scripts/seed-demo.js",
     "backup": "node --env-file-if-exists=.env scripts/backup.js",
-    "cache:rebuild": "node --env-file-if-exists=.env scripts/rebuild-cache.js"
+    "cache:rebuild": "node --env-file-if-exists=.env scripts/rebuild-cache.js",
+    "brand:export": "node scripts/export-brand.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

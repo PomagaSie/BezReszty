@@ -126,6 +126,7 @@ Odtwarzaj przy zatrzymanej aplikacji: zastąp `bezreszty.sqlite` sprawdzoną kop
 - `website/` — statyczna strona dla `pomagasie.github.io`, bez procesu budowania.
 - `organisation/profile/README.md` — profil GitHub organizacji, do repozytorium `PomagaSie/.github` jako `profile/README.md`.
 - `brand/` — logo, znak, grafika społecznościowa i zasady marki.
+- [Zestaw PNG](brand/PNG.md) — 57 ikon, logotypów i grafik BezReszty oraz PomagaSie; [pobierz ZIP](https://pomagasie.github.io/assets/brand-kit.zip). Ponowny eksport: `npm run brand:export` (Node.js 24 i `zip`).
 - [PUBLISHING.md](docs/PUBLISHING.md) — publikacja strony organizacji na GitHub Pages.
 
 ## Testy

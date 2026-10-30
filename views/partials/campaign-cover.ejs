@@ -1,0 +1,7 @@
+<% const media = campaignMedia(campaign); if (media.length) { %>
+<div class="campaign-screenshots" aria-label="Podgląd aplikacji Szkatułka Bajek">
+  <% media.forEach(item => { %><img src="<%= asset(item.src) %>" alt="<%= detail ? item.alt : '' %>" loading="<%= detail ? 'eager' : 'lazy' %>" width="1080" height="2340"><% }) %>
+</div>
+<% } else { %>
+<img src="<%= asset('/assets/images/' + campaign.cover + '.svg') %>" alt="<%= detail ? 'Ilustracja kategorii zbiórki' : '' %>" loading="<%= detail ? 'eager' : 'lazy' %>" width="800" height="500">
+<% } %>

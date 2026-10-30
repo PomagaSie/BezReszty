@@ -19,7 +19,7 @@ async function derivePassword(password, salt, options) {
 export const todayWarsaw = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 export const verificationCode = user => user.verification_code || null;
 export const notificationAddress = (user, config) => `${config.notificationPrefix || ''}${user.notification_alias}@${config.notificationDomain}`;
-export const categories = { zdrowie: 'Zdrowie', zwierzeta: 'Zwierzęta', spolecznosc: 'Społeczność', edukacja: 'Edukacja', marzenia: 'Marzenia', pomoc: 'Pilna pomoc' };
+export const categories = { zdrowie: 'Zdrowie', dzieci: 'Dzieci', zwierzeta: 'Zwierzęta', spolecznosc: 'Społeczność', edukacja: 'Edukacja', marzenia: 'Marzenia', pomoc: 'Pilna pomoc' };
 export const covers = ['community', 'nature', 'care', 'education', 'animals', 'dream'];
 export const token = (bytes = 32) => randomBytes(bytes).toString('hex');
 export const hash = value => createHash('sha256').update(value).digest('hex');

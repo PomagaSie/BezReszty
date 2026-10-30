@@ -1,0 +1,9 @@
+<% const media = campaignMedia(campaign); if (media.length) { %>
+<section class="campaign-gallery" aria-labelledby="gallery-heading">
+  <h2>Zajrzyj do Szkatułki Bajek</h2>
+  <p>Zrzuty z działającej aplikacji. Dotknij obrazu, aby zobaczyć go w pełnym rozmiarze.</p>
+  <div class="campaign-gallery-grid"><% media.forEach(item => { %>
+    <a href="<%= asset(item.src) %>" target="_blank" rel="noopener"><img src="<%= asset(item.src) %>" alt="<%= item.alt %>" loading="lazy" width="1080" height="2340"></a>
+  <% }) %></div>
+</section>
+<% } %>

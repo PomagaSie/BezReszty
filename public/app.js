@@ -84,3 +84,54 @@ if (payment) {
   if (!confirmed) timer = setTimeout(() => check(), 10000);
   window.addEventListener('pagehide', () => clearTimeout(timer));
 }
+
+const mobywatel = document.querySelector('[data-mobywatel]');
+if (mobywatel) {
+  const shownExpiry = mobywatel.dataset.expiresAt, timerBox = mobywatel.querySelector('[data-mobywatel-timer]');
+  const deadline = shownExpiry ? performance.now() + Number(mobywatel.dataset.remainingMs) : 0;
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
+    if (timerBox) timerBox.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    if (!left) window.location.reload();
+  };
+  if (deadline) { tick(); setInterval(tick, 1000); }
+  const poll = async () => {
+    if (document.hidden) return;
+    try {
+      const response = await fetch('/api/weryfikacja/status', { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+      if (!response.ok) return;
+      const result = await response.json();
+      if (String(result.mobywatelExpiresAt || '') !== shownExpiry || result.status !== 'pending') window.location.reload();
+    } catch { /* The next poll retries. */ }
+  };
+  setInterval(poll, 5000);
+}
+
+const decodeQrImage = async blob => {
+  const bitmap = await createImageBitmap(blob), scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas'); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+  const context = canvas.getContext('2d', { willReadFrequently: true }); context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  return window.jsQR?.(image.data, image.width, image.height, { inversionAttempts: 'attemptBoth' })?.data || null;
+};
+for (const form of document.querySelectorAll('[data-qr-form]')) {
+  const status = form.querySelector('[data-qr-status]'), field = form.querySelector('[data-qr-code]'), drop = form.querySelector('[data-qr-drop]'), file = form.querySelector('[data-qr-file]');
+  const handle = async blob => {
+    status.textContent = 'Odczytuję kod QR…';
+    try {
+      const text = await decodeQrImage(blob);
+      if (text) { field.value = text; status.textContent = '✓ Odczytano kod QR. Sprawdź i kliknij „Pokaż kod organizatorowi”.'; }
+      else status.textContent = 'Nie znaleziono kodu QR na obrazie. Zrób wyraźniejszy zrzut samego kodu.';
+    } catch { status.textContent = 'Nie udało się odczytać obrazu.'; }
+  };
+  drop.addEventListener('paste', event => {
+    const item = [...event.clipboardData.items].find(entry => entry.type.startsWith('image/'));
+    if (item) { event.preventDefault(); handle(item.getAsFile()); return; }
+    const text = event.clipboardData.getData('text').trim();
+    if (!text) return;
+    event.preventDefault();
+    if (/^[A-Za-z0-9]{3}\s?[A-Za-z0-9]{3}$/.test(text)) { form.querySelector('[data-qr-manual]').value = text; status.textContent = '✓ Wklejono kod sześcioznakowy.'; }
+    else { field.value = text; status.textContent = '✓ Wklejono treść kodu QR.'; }
+  });
+  file.addEventListener('change', () => { if (file.files[0]) handle(file.files[0]); });
+}

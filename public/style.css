@@ -20,3 +20,7 @@
 
 /* Authenticator enrollment and one-time recovery codes. */
 .mfa-qr{display:block;max-width:100%;height:auto;margin:1rem auto}.mfa-secret{overflow-wrap:anywhere}.recovery-codes{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:.5rem}.recovery-codes code{font-size:.85rem}
+
+.phone-confirm{margin-block:16px;padding:14px 16px;border:1px dashed var(--line);border-radius:10px}.phone-confirm h4{margin:0 0 8px}.phone-confirm form{margin-top:10px}
+.mobywatel-card{border:1px solid var(--line);border-radius:14px;padding:24px;margin-block:20px;background:white}.mobywatel-card.active{border-width:2px}.mobywatel-qr{display:block;margin:16px auto;max-width:100%;height:auto}.mobywatel-card ol{padding-left:22px}.mobywatel-code-form{margin-top:12px}.mobywatel-code-form input{width:100%;margin-block:6px}
+.mobywatel-codes{display:flex;flex-wrap:wrap;gap:24px;justify-content:center;margin-block:16px}.mobywatel-block{text-align:center}.mobywatel-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:44px;font-weight:800;letter-spacing:.12em;margin:12px 0;padding:14px 22px;border:2px solid currentColor;border-radius:12px}.qr-drop{border:2px dashed var(--line);border-radius:10px;padding:14px;margin-block:8px;font-size:12px}.qr-drop:focus{outline:2px solid currentColor}

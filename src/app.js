@@ -113,6 +113,14 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     db.prepare('DELETE FROM mfa_challenges WHERE user_id=?').run(userId);
   };
   const campaignBySlug = slug => db.prepare(`${aggregate} WHERE c.slug=?`).get(slug);
+  const mobywatelCodeTtl = 3 * 60 * 1000;
+  // Operator-entered mObywatel verifier code, visible to its organizer for three minutes only.
+  const mobywatelCheck = async user => {
+    const expiresAt = Number(user.mobywatel_code_expires_at) || 0;
+    if (!user.mobywatel_code && !user.mobywatel_manual_code) return null;
+    if (expiresAt <= Date.now() || user.verification_status !== 'pending') { db.prepare('UPDATE users SET mobywatel_code=NULL,mobywatel_code_expires_at=NULL,mobywatel_manual_code=NULL WHERE id=?').run(user.id); return null; }
+    return { manualCode: user.mobywatel_manual_code || '', expiresAt, remainingMs: expiresAt - Date.now(), qr: user.mobywatel_code ? await QRCode.toDataURL(user.mobywatel_code, { width: 288, margin: 2 }) : null };
+  };
   const dashboard = (id, page) => ({
     campaigns: db.prepare(`${aggregate} WHERE c.owner_id=? ORDER BY c.created_at DESC,c.id LIMIT 12 OFFSET ?`).all(id, (page - 1) * 12),
     stats: db.prepare('SELECT COUNT(*) count,COALESCE(SUM(t.raised),0) raised,COALESCE(SUM(t.supporters),0) supporters FROM campaigns c JOIN campaign_totals t ON t.campaign_id=c.id WHERE c.owner_id=?').get(id),
@@ -300,23 +308,23 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     res.redirect('/panel/bezpieczenstwo');
   });
 
-  app.get('/panel', requireUser, (req, res) => {
+  app.get('/panel', requireUser, async (req, res) => {
     const notices = { registered: 'Konto utworzone. Sprawdź pocztę i potwierdź adres e-mail.', 'verified-email': 'Adres e-mail potwierdzony.', 'mail-sent': 'Wiadomość wysłana. Sprawdź swoją skrzynkę.', 'mail-error': 'Nie udało się wysłać wiadomości. Spróbuj ponownie lub skontaktuj się z operatorem.', 'bank-sent': 'Dane wysłane do weryfikacji. Teraz skonfiguruj powiadomienia bankowe.', saved: 'Zmiany zapisane.', submitted: 'Zbiórka czeka na sprawdzenie przez operatora.' };
     const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.strona, 10) || 1));
-    res.render('dashboard', { title: 'Twoje centrum pomagania', ...dashboard(req.user.id, page), page, notice: notices[req.query.notice] || null });
+    res.render('dashboard', { title: 'Twoje centrum pomagania', ...dashboard(req.user.id, page), mobywatel: await mobywatelCheck(req.user), page, notice: notices[req.query.notice] || null });
   });
-  app.get('/panel/weryfikacja', requireUser, (req, res) => res.render('bank', { title: 'Weryfikacja organizatora', values: req.user }));
+  app.get('/panel/weryfikacja', requireUser, async (req, res) => res.render('bank', { title: 'Weryfikacja organizatora', values: req.user, mobywatel: await mobywatelCheck(req.user) }));
   app.get('/api/weryfikacja/status', readLimit, (req, res) => {
     res.set('Cache-Control', 'no-store');
     if (!req.user) return res.sendStatus(401);
-    res.json({ notificationSeen: Boolean(req.user.bank_notification_seen), status: req.user.verification_status, startedAt: req.user.verification_started_at || null });
+    res.json({ notificationSeen: Boolean(req.user.bank_notification_seen), status: req.user.verification_status, startedAt: req.user.verification_started_at || null, mobywatelExpiresAt: (req.user.mobywatel_code || req.user.mobywatel_manual_code) && req.user.verification_status === 'pending' && req.user.mobywatel_code_expires_at > Date.now() ? req.user.mobywatel_code_expires_at : null });
   });
   app.post('/panel/weryfikacja', requireUser, limiter('bank-submit-user', 10, 15 * 60000, req => req.user.id), (req, res) => {
     if (config.demo || ['verified', 'pending'].includes(req.user.verification_status)) return res.status(409).render('error', { title: 'Dane są zablokowane', message: 'Zmianę danych płatniczych uzgodnij z operatorem. Wymaga ponownej weryfikacji.' });
     if (!req.user.email_verified) return formError(res, 'bank', new Error('Najpierw potwierdź adres e-mail.'), { values: req.body });
     try {
       const data = bankSchema.parse(req.body);
-      db.prepare("UPDATE users SET name=?,phone=?,iban=?,verification_status='pending',verification_note='',bank_notification_seen=0,verification_code=NULL,verification_started_at=NULL,submitted_at=? WHERE id=?").run(data.name, data.phone, data.iban, now(), req.user.id);
+      db.prepare("UPDATE users SET name=?,phone=?,iban=?,verification_status='pending',verification_note='',bank_notification_seen=0,verification_code=NULL,verification_started_at=NULL,phone_identity_confirmed_at=NULL,mobywatel_code=NULL,mobywatel_code_expires_at=NULL,mobywatel_manual_code=NULL,submitted_at=? WHERE id=?").run(data.name, data.phone, data.iban, now(), req.user.id);
       audit(db, req.user.id, 'verification_submitted', req.user.id);
       res.redirect('/panel?notice=bank-sent');
     } catch (error) { formError(res, 'bank', error, { values: req.body }); }
@@ -410,11 +418,38 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
     const action = req.body.action, note = String(req.body.note || '').trim().slice(0, 1000);
     if (!user || !['verify','reject','suspend'].includes(action) || note.length < 10) return res.status(422).render('error', { title: 'Uzupełnij uzasadnienie', message: 'Wymagany jest opis przeprowadzonej weryfikacji lub przyczyny odmowy (minimum 10 znaków).' });
-    if (action === 'verify' && (!user.email_verified || !user.phone || !user.iban || !user.bank_notification_seen || user.verification_status !== 'pending')) return res.status(409).render('error', { title: 'Weryfikacja niekompletna', message: 'Potrzebne są potwierdzony e-mail, dane rachunku oraz podpisane powiadomienie z przelewu testowego.' });
+    if (action === 'verify' && (!user.email_verified || !user.phone || !user.iban || !user.bank_notification_seen || !user.phone_identity_confirmed_at || user.verification_status !== 'pending')) return res.status(409).render('error', { title: 'Weryfikacja niekompletna', message: 'Potrzebne są potwierdzony e-mail, dane rachunku, podpisane powiadomienie z przelewu testowego oraz telefoniczne potwierdzenie zgodności imienia i nazwiska.' });
     transaction(db, () => {
       db.prepare('UPDATE users SET verification_status=?,verification_note=?,verified_at=? WHERE id=?').run(action === 'verify' ? 'verified' : 'rejected', note, action === 'verify' ? now() : null, user.id);
       if (action !== 'verify') db.prepare("UPDATE campaigns SET status='closed',updated_at=? WHERE owner_id=? AND status IN ('published','pending')").run(now(), user.id);
       audit(db, req.user.id, `organizer_${action}`, user.id, note);
+    });
+    res.redirect('/admin');
+  });
+  app.post('/admin/organizator/:id/potwierdzenie-telefoniczne', requireAdmin, (req, res) => {
+    if (config.demo) return res.sendStatus(403);
+    const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+    if (!user || user.verification_status !== 'pending' || !user.phone) return res.sendStatus(409);
+    transaction(db, () => {
+      db.prepare('UPDATE users SET phone_identity_confirmed_at=? WHERE id=?').run(now(), user.id);
+      audit(db, req.user.id, 'organizer_phone_identity_confirmed', user.id, 'Zgodność imienia i nazwiska potwierdzona telefonicznie.');
+    });
+    res.redirect('/admin');
+  });
+  app.post('/admin/organizator/:id/kod-mobywatel', requireAdmin, (req, res) => {
+    if (config.demo) return res.sendStatus(403);
+    const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+    const code = String(req.body.code || '').trim(), manualDigits = String(req.body.manualCode || '').replace(/\s+/g, '').toUpperCase();
+    if (!user || user.verification_status !== 'pending') return res.sendStatus(409);
+    if ((!code && !manualDigits) || code.length > 500 || (manualDigits && !/^[A-Z0-9]{6}$/.test(manualDigits)) || /[\u0000-\u001f\u007f]/.test(code)) return res.status(422).render('error', { title: 'Nieprawidłowy kod', message: 'Wklej zrzut ekranu z kodem QR z weryfikatora mObywatel i/lub wpisz kod sześcioznakowy (np. 123 456).' });
+    const manualCode = manualDigits ? `${manualDigits.slice(0, 3)} ${manualDigits.slice(3)}` : '';
+    // The verifier payload carries its own expiry (unix seconds, 10th field); never show a code past it.
+    const issuedUntil = /^\d{10}$/.test(code.split(';')[9] || '') ? Number(code.split(';')[9]) * 1000 : Infinity;
+    if (issuedUntil <= Date.now()) return res.status(422).render('error', { title: 'Kod wygasł', message: 'Kod z weryfikatora mObywatel stracił ważność. Wygeneruj nowy i spróbuj ponownie.' });
+    const expiresAt = Math.min(Date.now() + mobywatelCodeTtl, issuedUntil);
+    transaction(db, () => {
+      db.prepare('UPDATE users SET mobywatel_code=?,mobywatel_manual_code=?,mobywatel_code_expires_at=? WHERE id=?').run(code || null, manualCode || null, expiresAt, user.id);
+      audit(db, req.user.id, 'organizer_mobywatel_code_shown', user.id, 'Kod mObywatel udostępniony organizatorowi.');
     });
     res.redirect('/admin');
   });

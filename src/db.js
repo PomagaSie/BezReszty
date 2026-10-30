@@ -80,6 +80,10 @@ export function openDatabase(path) {
     if (!userColumns.has('verification_code')) db.exec('ALTER TABLE users ADD COLUMN verification_code TEXT');
     if (!userColumns.has('verification_started_at')) db.exec('ALTER TABLE users ADD COLUMN verification_started_at TEXT');
     if (!userColumns.has('verification_code')) db.exec("UPDATE users SET verification_code='BR-KONTO-' || upper(substr(replace(id,'-',''),1,12)),verification_started_at=submitted_at WHERE verification_status='pending' AND bank_notification_seen=0 AND submitted_at IS NOT NULL");
+    if (!userColumns.has('phone_identity_confirmed_at')) db.exec('ALTER TABLE users ADD COLUMN phone_identity_confirmed_at TEXT');
+    if (!userColumns.has('mobywatel_code')) db.exec('ALTER TABLE users ADD COLUMN mobywatel_code TEXT');
+    if (!userColumns.has('mobywatel_code_expires_at')) db.exec('ALTER TABLE users ADD COLUMN mobywatel_code_expires_at INTEGER');
+    if (!userColumns.has('mobywatel_manual_code')) db.exec('ALTER TABLE users ADD COLUMN mobywatel_manual_code TEXT');
     if (!userColumns.has('mfa_secret')) db.exec('ALTER TABLE users ADD COLUMN mfa_secret TEXT');
     if (!userColumns.has('mfa_last_step')) db.exec('ALTER TABLE users ADD COLUMN mfa_last_step INTEGER');
     const sessionColumns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map(column => column.name));

@@ -72,7 +72,7 @@ test('verification polling is private, uncached, reflects incoming mail and neve
  const agent=request.agent(app);await login(agent,owner);
  const response=await agent.get('/api/weryfikacja/status');
  assert.match(response.headers['cache-control'],/no-store/);
- assert.deepEqual(response.body,{notificationSeen:false,status:'pending',startedAt:'2026-10-30T00:00:00.000Z'});
+ assert.deepEqual(response.body,{notificationSeen:false,status:'pending',startedAt:'2026-10-30T00:00:00.000Z',mobywatelExpiresAt:null});
  assert.equal(db.prepare('SELECT verification_code FROM users WHERE id=?').get(owner.id).verification_code,'A7BC');
  db.prepare('UPDATE users SET bank_notification_seen=1 WHERE id=?').run(owner.id);
  assert.equal((await agent.get('/api/weryfikacja/status')).body.notificationSeen,true);
@@ -132,6 +132,10 @@ test('operator cannot approve without bank notification and suspension closes ca
  const agent=request.agent(app),_csrf=await login(agent,admin);
  assert.equal((await agent.post(`/admin/organizator/${organizer.id}`).type('form').send({_csrf,action:'verify',note:'Sprawdzono dane właściciela i numer BLIK.'})).status,409);
  db.prepare('UPDATE users SET bank_notification_seen=1 WHERE id=?').run(organizer.id);
+ assert.equal((await agent.post(`/admin/organizator/${organizer.id}`).type('form').send({_csrf,action:'verify',note:'Sprawdzono dane właściciela i numer BLIK.'})).status,409);
+ assert.equal((await agent.post(`/admin/organizator/${organizer.id}/potwierdzenie-telefoniczne`).type('form').send({_csrf})).status,302);
+ assert.ok(db.prepare('SELECT phone_identity_confirmed_at v FROM users WHERE id=?').get(organizer.id).v);
+ assert.match((await agent.get('/admin')).text,/weryfikator\.mobywatel\.gov\.pl\/verification-process/);
  assert.equal((await agent.post(`/admin/organizator/${organizer.id}`).type('form').send({_csrf,action:'verify',note:'Sprawdzono dane właściciela i numer BLIK.'})).status,302);
  const campaign=addCampaign(db,organizer);
  assert.equal((await agent.post(`/admin/organizator/${organizer.id}`).type('form').send({_csrf,action:'suspend',note:'Wstrzymano w celu wyjaśnienia rachunku.'})).status,302);
@@ -178,4 +182,34 @@ test('domain migration preserves paths and query strings and never replays an ol
  }
  assert.equal((await request(app).post('/logowanie').set('Host','bezreszty.mleczki.pl').send({password:'unused'})).status,409);
  assert.equal((await request(app).get('/healthz').set('Host','bezreszty.org.pl')).status,200);db.close();
+});
+
+test('operator shows an mObywatel QR code to the organizer for at most three minutes',async()=>{
+ const {app,db}=setup();const admin=await addUser(db,{role:'admin'}),organizer=await addUser(db,{verification_status:'pending'});
+ enableMfa(db,admin);
+ const adminAgent=request.agent(app),adminCsrf=await login(adminAgent,admin);
+ const orgAgent=request.agent(app);await login(orgAgent,organizer);
+ const url=`/admin/organizator/${organizer.id}/kod-mobywatel`,now=Math.floor(Date.now()/1000);
+ const payload=(from,until)=>`26;D;1;;;;;cc30a6d3-4445-4501-84b5-bce684d7115d;${from};${until};;0;8;;`;
+ assert.match((await orgAgent.get('/panel')).text,/Czekamy na kod od operatora/);
+ assert.equal((await adminAgent.post(url).type('form').send({_csrf:adminCsrf,code:''})).status,422);
+ assert.equal((await adminAgent.post(url).type('form').send({_csrf:adminCsrf,code:payload(now-300,now-120)})).status,422);
+ assert.equal((await adminAgent.post(url).type('form').send({_csrf:adminCsrf,code:payload(now,now+3600*24)})).status,302);
+ assert.ok(db.prepare('SELECT mobywatel_code_expires_at e FROM users WHERE id=?').get(organizer.id).e<=Date.now()+180000);
+ assert.equal((await adminAgent.post(url).type('form').send({_csrf:adminCsrf,code:payload(now,now+60),manualCode:'abc123'})).status,302);
+ const expires=db.prepare('SELECT mobywatel_code_expires_at e FROM users WHERE id=?').get(organizer.id).e;assert.ok(expires<=(now+60)*1000);
+ const page=await orgAgent.get('/panel');assert.match(page.text,/data:image\/png;base64/);assert.match(page.text,/ABC 123/);assert.match(page.text,/Zeskanuj kod QR/);assert.match(page.text,/Udostępnij dane/);
+ assert.ok(!page.text.includes('cc30a6d3'));
+ assert.match(page.text,/Kod do wpisania/);
+ assert.equal((await adminAgent.post(url).type('form').send({_csrf:adminCsrf,manualCode:'12 34'})).status,422);
+ assert.equal((await adminAgent.post(url).type('form').send({_csrf:adminCsrf,manualCode:'123 456'})).status,302);
+ const manualOnly=(await orgAgent.get('/panel')).text;assert.match(manualOnly,/123 456/);assert.doesNotMatch(manualOnly,/data:image\/png/);
+ const manualExpiry=db.prepare('SELECT mobywatel_code_expires_at e FROM users WHERE id=?').get(organizer.id).e;assert.ok(manualExpiry>Date.now()+170000&&manualExpiry<=Date.now()+180000);
+ assert.equal((await adminAgent.post(url).type('form').send({_csrf:adminCsrf,code:payload(now,now+60),manualCode:'abc123'})).status,302);
+ const status=(await orgAgent.get('/api/weryfikacja/status')).body;assert.equal(status.mobywatelExpiresAt,expires);
+ assert.ok(!JSON.stringify(status).includes('cc30a6d3'));
+ assert.ok(!db.prepare("SELECT note FROM audit WHERE action='organizer_mobywatel_code_shown' ORDER BY id DESC").get().note.includes('cc30a6d3'));
+ db.prepare('UPDATE users SET mobywatel_code_expires_at=? WHERE id=?').run(Date.now()-1,organizer.id);
+ assert.doesNotMatch((await orgAgent.get('/panel')).text,/ABC 123/);
+ assert.equal(db.prepare('SELECT mobywatel_code c FROM users WHERE id=?').get(organizer.id).c,null);db.close();
 });

@@ -29,7 +29,7 @@ Dla self-hostingu bez Workera można użyć poniższego procesu ze skrzynką IMA
 2. Ustaw `NOTIFICATION_DOMAIN` na tę subdomenę, a `IMAP_HOST`, `IMAP_PORT=993`, `IMAP_USER`, `IMAP_PASSWORD` na skrzynkę. Certyfikat TLS musi być poprawny.
 3. W panelu każdy organizator zobaczy oddzielny adres: `<losowy-alias>@powiadomienia.twojadomena.pl`. **Nie zmieniaj nagłówka To ani treści bankowego e-maila.** Routing kopertowy/alias jest dopuszczalny, przepisywanie podpisanych nagłówków i dopiski w treści mogą zepsuć DKIM.
 4. Organizator w Alior Online ustawia ten adres dla powiadomień o **uznaniu rachunku** właściwego konta. Przed zmianą ustawień sprawdza dostępne opcje w swoim banku. Nie potrzebujemy jego hasła, cookies, numeru karty ani kodów bankowych.
-5. Po zgłoszeniu danych organizator wykonuje na swój rachunek testowy przelew z tytułem `BR-KONTO-<kod z panelu>`. Panel pokazuje odebranie uwierzytelnionego powiadomienia.
+5. Po zgłoszeniu danych organizator klika „Uruchom test” i wykonuje na swój rachunek testowy przelew z tytułem równym wygenerowanemu czteroznakowemu kodowi z panelu. Odświeżenie strony zachowuje kod; ponowne uruchomienie testu generuje nowy i unieważnia poprzedni. Panel pokazuje odebranie uwierzytelnionego powiadomienia.
 6. Operator dodatkowo sprawdza właściciela rachunku i telefon według [VERIFICATION.md](VERIFICATION.md). Dopiero potem akceptuje konto.
 
 Format wiadomości i podpisy zweryfikuj na rzeczywistym bankowym powiadomieniu docelowej skrzynki. Testy repozytorium używają syntetycznych podpisanych e-maili; nie potwierdzają dostarczalności konkretnego dostawcy.
@@ -38,7 +38,7 @@ Format wiadomości i podpisy zweryfikuj na rzeczywistym bankowym powiadomieniu d
 
 - Surowa wiadomość RFC822 do 256 KiB, brak duplikatów istotnych nagłówków.
 - Dokładny nadawca `powiadomienia@alior.pl`.
-- Poprawny DKIM z domeny z listy `BANK_DKIM_DOMAINS` (domyślnie `alior.pl,aliorbank.pl`); podpisane: From, To, Subject, Date i występujące nagłówki MIME. Pełne ciało wiadomości, klucz nieoznaczony jako testowy.
+- Poprawny DKIM z domeny z listy `BANK_DKIM_DOMAINS` (domyślnie `alior.pl,aliorbank.pl`); podpisane: From, To i Subject oraz pełne ciało wiadomości; klucz nieoznaczony jako testowy. Czas jest uwierzytelniony przez podpisany Date albo znacznik t= w DKIM. Niepodpisane zewnętrzne nagłówki MIME są ignorowane przy dekodowaniu: dla obsługiwanego multipart granica i nagłówki części pochodzą z podpisanego ciała; inne niepodpisane formaty są odrzucane.
 - Data wiadomości nie starsza niż 7 dni i nie więcej niż 5 minut w przyszłości.
 - Pojedynczy podpisany adres `To` równy aliasowi znanego organizatora.
 - Temat `Uznanie rachunku 46...5420 kwotą 50,00 PLN`, zgodność kwoty w treści i temacie.
@@ -64,3 +64,9 @@ Zalecana retencja skrzynki powinna uwzględniać czas potrzebny na wyjaśnienie 
 W `/admin` widać wyjątki, np. `amount_mismatch`, `account_mismatch`, `unknown_or_ambiguous_reference`, `dkim_not_authenticated`. Takie zdarzenia nie zwiększają sumy zbiórki. Wyjaśniaj je z organizatorem na podstawie historii jego rachunku. Nie ma przycisku do zatwierdzania niesprawdzonego e-maila. Jeśli bank zmieni format, popraw parser i dodaj zanonimizowany test regresyjny przed ponownym importem.
 
 Zapisywane są tylko fingerprint, organizator, kwota, tytuł, maska rachunku, status i referencja wpłaty. Treść wiadomości i nazwa bankowego nadawcy nie trafiają do bazy ani logów aplikacji.
+
+### Krótkotrwała diagnostyka podpisu
+
+Webhook zapisuje wiadomości odrzucone przez DKIM lub niedopasowane do wpłaty w szyfrowanej kwarantannie AES-256-GCM na maksymalnie godzinę (do 20 wiadomości). Klucz wyprowadza HKDF z sekretu webhooka, a fingerprint jest uwierzytelnionymi metadanymi szyfrogramu. W logach pojawiają się wyłącznie status podpisu, domena i brakujące nagłówki, bez treści, adresów odbiorców ani kwot. Serwer usuwa przeterminowane wpisy co 30 sekund; skrypt kopii bazy usuwa kwarantannę z eksportu.
+
+Po poprawieniu i przetestowaniu walidacji operator może wykonać `docker exec bezreszty-app-1 node scripts/reprocess-bank-mail.js`. Polecenie ponownie sprawdza prawdziwy DKIM i wszystkie warunki dopasowania; nie ma trybu pomijania uwierzytelnienia. Pomyślnie przetworzony oryginał jest usuwany, a zatwierdzone wpłaty są nadal chronione przed powtórzeniem. Rotacja sekretu webhooka uniemożliwia odszyfrowanie wcześniejszej kwarantanny.

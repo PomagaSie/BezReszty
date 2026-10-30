@@ -10,12 +10,13 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.js",
     "dev": "node --env-file-if-exists=.env --watch src/server.js",
-    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js && npm --prefix email-worker test",
     "check": "node scripts/check.js",
     "admin": "node --env-file-if-exists=.env scripts/admin.js",
     "mail:sync": "node --env-file-if-exists=.env scripts/mail-sync.js",
     "demo:seed": "node --env-file-if-exists=.env scripts/seed-demo.js",
-    "backup": "node --env-file-if-exists=.env scripts/backup.js"
+    "backup": "node --env-file-if-exists=.env scripts/backup.js",
+    "cache:rebuild": "node --env-file-if-exists=.env scripts/rebuild-cache.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
@@ -27,6 +28,8 @@
     "mailauth": "^8.0.4",
     "mailparser": "^3.7.4",
     "nodemailer": "^10.2.1",
+    "otpauth": "^9.5.2",
+    "qrcode": "^1.5.4",
     "zod": "^4.1.12"
   },
   "devDependencies": {

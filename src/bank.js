@@ -2,10 +2,13 @@ import { dkimVerify } from 'mailauth/lib/dkim/verify';
 import { simpleParser } from 'mailparser';
 import { ImapFlow } from 'imapflow';
 import { randomUUID } from 'node:crypto';
+import { signedMultipartSource } from './shared/bank-mail-mime.js';
 import { verificationCode, accountMatches, toCents, hash } from './domain.js';
 import { now, transaction, audit } from './db.js';
 
 const clean = text => text.replace(/<[^>]*>/g, '').replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').trim();
+const signedHeaderNames = signature => (Array.isArray(signature.signingHeaders?.keys) ? signature.signingHeaders.keys : String(signature.signingHeaders?.keys || '').split(':')).map(value => value.toLowerCase().trim());
+
 export function parseAlior(subject, body) {
   const subjectMatch = subject.match(/^Uznanie rachunku (\d{2}\.{3}\d{4}|\d{26}) kwotą ([\d ,\u00a0]+) PLN\s*$/u);
   if (!subjectMatch) return null;
@@ -33,23 +36,41 @@ export async function authenticateBankMail(raw, config, options = {}) {
   const message = await simpleParser(raw, { skipHtmlToText: true, skipTextToHtml: true, skipImageLinks: true });
   if (message.from?.value?.length !== 1 || message.from.value[0].address?.toLowerCase() !== 'powiadomienia@alior.pl') return { rejected: 'unexpected_sender' };
   const result = await dkimVerify(raw, { strict: true, ...options });
-  const required = ['from', 'to', 'subject', 'date'];
-  if (/^content-type:/im.test(headers)) required.push('content-type');
-  if (/^content-transfer-encoding:/im.test(headers)) required.push('content-transfer-encoding');
-  const signature = result.results.find(s => s.status.result === 'pass' && !s.status.testing && !s.canonBodyLengthLimited && config.bankDkimDomains.includes(s.signingDomain?.toLowerCase()) && required.every(h => (Array.isArray(s.signingHeaders?.keys) ? s.signingHeaders.keys : String(s.signingHeaders?.keys || '').split(':')).map(v => v.toLowerCase().trim()).includes(h)));
+  const required = ['from', 'to', 'subject'];
+  const mimeHeaders = ['content-type', 'content-transfer-encoding'].filter(h => new RegExp(`^${h}:`, 'im').test(headers));
+  const multipart = signedMultipartSource(raw);
+  const signature = result.results.find(s => {
+    const signed = signedHeaderNames(s);
+    return s.status.result === 'pass' && !s.status.testing && !s.canonBodyLengthLimited && config.bankDkimDomains.includes(s.signingDomain?.toLowerCase()) && required.every(h => signed.includes(h)) &&
+      (signed.includes('date') || Boolean(s.signTime)) && (mimeHeaders.every(h => signed.includes(h)) || Boolean(multipart));
+  });
   if (!signature) {
     if (result.results.some(s => s.status.result === 'temperror')) throw new Error('DKIM_DNS_TEMPORARY_FAILURE');
-    return { rejected: 'dkim_not_authenticated' };
+    return { rejected: 'dkim_not_authenticated', diagnostics: result.results.map(s => ({
+      result: s.status.result,
+      domain: s.signingDomain || null,
+      testing: Boolean(s.status.testing),
+      partialBody: Boolean(s.canonBodyLengthLimited),
+      missingHeaders: required.filter(h => !signedHeaderNames(s).includes(h)),
+    })) };
   }
-  if (!message.date || Math.abs(Date.now() - message.date.getTime()) > 7 * 86400000 || message.date.getTime() > Date.now() + 5 * 60000) return { rejected: 'stale_message' };
+  const signed = signedHeaderNames(signature);
+  const date = signed.includes('date') ? message.date : new Date(signature.signTime);
+  if (!date || !Number.isFinite(date.getTime()) || Math.abs(Date.now() - date.getTime()) > 7 * 86400000 || date.getTime() > Date.now() + 5 * 60000) return { rejected: 'stale_message' };
+  const content = mimeHeaders.every(h => signed.includes(h)) ? message : await simpleParser(Buffer.from(multipart), { skipHtmlToText: true, skipTextToHtml: true, skipImageLinks: true });
   const recipients = (Array.isArray(message.to) ? message.to.flatMap(v => v.value) : message.to?.value || []).map(v => v.address?.toLowerCase());
   if (recipients.length !== 1) return { rejected: 'ambiguous_recipient' };
-  return { fingerprint: hash(signature.signature), recipient: recipients[0], subject: message.subject || '', body: message.html || message.text || '', date: message.date.toISOString() };
+  return { fingerprint: hash(signature.signature), recipient: recipients[0], subject: message.subject || '', body: content.html || content.text || '', date: date.toISOString() };
 }
 
-export function ingestAuthenticatedMail(db, config, event) {
+export function ingestAuthenticatedMail(db, config, event, { reprocessQuarantined = false } = {}) {
   return transaction(db, () => {
-    if (db.prepare('SELECT id FROM bank_messages WHERE fingerprint=?').get(event.fingerprint)) return 'duplicate';
+    const previous=db.prepare('SELECT id,status,reason FROM bank_messages WHERE fingerprint=?').get(event.fingerprint);
+    if (previous) {
+      if (!reprocessQuarantined || previous.status !== 'quarantined') return 'duplicate';
+      db.prepare('DELETE FROM bank_messages WHERE id=?').run(previous.id);
+      audit(db,null,'bank_mail_quarantine_retry',previous.id,previous.reason);
+    }
     const [localPart, domain] = event.recipient?.split('@') || [];
     const prefix = config.notificationPrefix || '';
     const alias = localPart?.startsWith(prefix) ? localPart.slice(prefix.length) : null;
@@ -57,10 +78,11 @@ export function ingestAuthenticatedMail(db, config, event) {
     const parsed = parseAlior(event.subject, event.body);
     let outcome = 'quarantined', reason = '', donationId = null;
     if (!owner) reason = 'unknown_recipient';
+    else if (event.subject === 'Zmiana adresu e-mail do powiadomień') { outcome = 'ignored'; reason = 'non_payment_notification'; }
     else if (!parsed) reason = 'unrecognized_notification';
     else if (!owner.iban || !accountMatches(parsed.accountMask, owner.iban)) reason = 'account_mismatch';
-    else if (parsed.title === verificationCode(owner)) {
-      if (owner.verification_status === 'pending' && owner.submitted_at && Date.parse(event.date) >= Date.parse(owner.submitted_at) - 120000) {
+    else if (parsed.title.replace(/\s+/gu, '') === verificationCode(owner)) {
+      if (owner.verification_status === 'pending' && !owner.bank_notification_seen && owner.verification_started_at && Date.parse(event.date) >= Date.parse(owner.verification_started_at) - 120000) {
         db.prepare('UPDATE users SET bank_notification_seen=1 WHERE id=?').run(owner.id);
         outcome = 'verification';
         audit(db, null, 'bank_notification_verified', owner.id);

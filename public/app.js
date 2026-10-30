@@ -28,6 +28,33 @@ document.querySelector('[data-demo-payment]')?.addEventListener('click', () => d
 for (const button of document.querySelectorAll('[data-close-dialog]')) button.addEventListener('click', () => button.closest('dialog').close());
 demoDialog?.addEventListener('click', event => { if(event.target===demoDialog) { const rect=demoDialog.getBoundingClientRect(); if(event.clientX<rect.left || event.clientX>rect.right || event.clientY<rect.top || event.clientY>rect.bottom) demoDialog.close(); } });
 const payment = document.querySelector('[data-payment-id]');
+const bankVerification = document.querySelector('[data-bank-verification]');
+if (bankVerification) {
+  let timer, running = false, stopped = false, paused = false, failures = 0;
+  async function checkBankVerification() {
+    if (running || stopped || paused) return;
+    if (document.hidden) { timer = setTimeout(checkBankVerification, 15000); return; }
+    running = true;
+    try {
+      const response = await fetch('/api/weryfikacja/status', { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+      if (response.status === 401) { stopped = true; return; }
+      if (!response.ok) throw new Error('Request failed');
+      const result = await response.json(); failures = 0;
+      if (result.notificationSeen || result.status !== 'pending' || result.startedAt !== bankVerification.dataset.startedAt) {
+        stopped = true;
+        window.location.reload();
+      }
+    } catch { failures++; }
+    finally {
+      running = false;
+      if (!stopped && !paused) timer = setTimeout(checkBankVerification, Math.min(60000, 5000 * (1 + failures)));
+    }
+  }
+  timer = setTimeout(checkBankVerification, 5000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { clearTimeout(timer); return checkBankVerification(); } });
+  window.addEventListener('pagehide', () => { paused = true; clearTimeout(timer); });
+  window.addEventListener('pageshow', event => { if (event.persisted) { paused = false; return checkBankVerification(); } });
+}
 if (payment) {
   const status = document.getElementById('payment-status'), button = document.getElementById('check-payment');
   let timer, failures = 0, attempts = 0, running = false, confirmed = status.dataset.initialStatus === 'confirmed';

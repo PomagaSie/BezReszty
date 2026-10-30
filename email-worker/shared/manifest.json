@@ -1,0 +1,11 @@
+{
+  "source": "infrastructure-mikrus/integrations/bank-mail-worker",
+  "files": {
+    "transport.js": "a2cd6c22b867b5c50504b98fee04ef2a1e64ea938aea9605dd60a103da843395",
+    "runtime-contract.js": "53671520d58a36d6ac41abccef2a349d82edfd2767caad7491cb6173411b6459",
+    "contract.test.js": "916db5518c1391ac6698dc052fd84ecf85e4e8e919997bc8dcc5452fdce3d4a0",
+    "mime.js": "68cbd5d2c04a53ce0c8b40531bf997b81541befdf99b25440ba4b574c4b16d35",
+    "mime.test.js": "09c80610ffd8cf90fa81bedbe765e5fcd51f617543db951af33cc9a6b9a872d1",
+    "../../src/shared/bank-mail-mime.js": "68cbd5d2c04a53ce0c8b40531bf997b81541befdf99b25440ba4b574c4b16d35"
+  }
+}

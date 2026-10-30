@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
-import { setup,addUser,addCampaign,addDonation,csrf,login,iban } from './helpers.js';
+import { setup,addUser,addCampaign,addDonation,csrf,login,iban,enableMfa } from './helpers.js';
 import { token,hash } from '../src/domain.js';
+import { ingestAuthenticatedMail } from '../src/bank.js';
 
 test('public pages render, errors stay escaped and responses have protective headers',async()=>{
  const {app,db}=setup();const owner=await addUser(db);const campaign=addCampaign(db,owner);
@@ -34,8 +35,54 @@ test('organizer access is isolated and verification cannot be self-approved',asy
  assert.equal(bank.status,302);assert.equal(db.prepare('SELECT verification_status FROM users WHERE id=?').get(other.id).verification_status,'pending');
  assert.equal((await agent.get('/panel/weryfikacja')).status,200);assert.equal((await agent.get('/panel/nowa-zbiorka')).status,200);db.close();
 });
+test('bank test codes are generated on explicit start, persist on refresh and change on restart',async()=>{
+ const {app,db,config}=setup();const owner=await addUser(db,{verification_status:'unsubmitted'}),agent=request.agent(app),_csrf=await login(agent,owner);
+ const start=()=>agent.post('/panel/weryfikacja/test').type('form').send({_csrf});
+ const read=()=>db.prepare('SELECT * FROM users WHERE id=?').get(owner.id);
+ assert.equal((await start()).status,409);assert.equal(read().verification_code,null);
+ assert.equal((await agent.post('/panel/weryfikacja').type('form').send({_csrf,name:owner.name,phone:owner.phone,iban,bankConsent:'on'})).status,302);
+ assert.equal(read().verification_code,null);assert.equal(read().verification_started_at,null);
+ assert.match((await agent.get('/panel/weryfikacja')).text,/Uruchom test/);assert.equal(read().verification_code,null);
+ assert.equal((await agent.post('/panel/weryfikacja/test').type('form').send({})).status,403);
+ assert.equal((await start()).status,302);const first=read();assert.match(first.verification_code,/^[A-F0-9]{4}$/);assert.ok(first.verification_started_at);
+ const page=await agent.get('/panel/weryfikacja');assert.ok(page.text.includes(`data-copy="${first.verification_code}"`));assert.equal(read().verification_code,first.verification_code);assert.equal(read().verification_started_at,first.verification_started_at);
+ assert.equal((await start()).status,302);const current=read();assert.notEqual(current.verification_code,first.verification_code);assert.match(current.verification_code,/^[A-F0-9]{4}$/);
+ const event=code=>({fingerprint:crypto.randomUUID(),recipient:`${owner.notification_alias}@${config.notificationDomain}`,subject:'Uznanie rachunku 96...0001 kwotą 1,00 PLN',body:`kwotą 1,00 PLN\nNadawca: TEST\nTytuł zlecenia: ${code}\n`,date:new Date().toISOString()});
+ assert.equal(ingestAuthenticatedMail(db,config,event(first.verification_code)),'quarantined');assert.equal(read().bank_notification_seen,0);
+ assert.equal(ingestAuthenticatedMail(db,config,event(current.verification_code)),'verification');assert.equal(read().bank_notification_seen,1);assert.equal(read().verification_status,'pending');
+ assert.equal((await start()).status,409);assert.match((await agent.get('/panel/weryfikacja')).text,/Powiadomienie testowe odebrane/);db.close();
+});
+test('bank test cannot start for unconfirmed email, demo or verified accounts; resubmission clears old codes',async()=>{
+ for(const scenario of [{},{demo:true},{unconfirmed:true}]){
+  const {app,db}=setup(scenario.demo?{demo:true}:{});const owner=await addUser(db,{verification_status:scenario.unconfirmed||scenario.demo?'pending':'verified'}),agent=request.agent(app),_csrf=await login(agent,owner);
+  if(scenario.unconfirmed)db.prepare('UPDATE users SET email_verified=0 WHERE id=?').run(owner.id);
+  db.prepare('UPDATE users SET bank_notification_seen=0 WHERE id=?').run(owner.id);
+  assert.equal((await agent.post('/panel/weryfikacja/test').type('form').send({_csrf})).status,409);assert.equal(db.prepare('SELECT verification_code FROM users WHERE id=?').get(owner.id).verification_code,null);db.close();
+ }
+ const {app,db}=setup();const owner=await addUser(db,{verification_status:'rejected'}),agent=request.agent(app),_csrf=await login(agent,owner);
+ db.prepare("UPDATE users SET verification_code='ABCD',verification_started_at=? WHERE id=?").run(new Date().toISOString(),owner.id);
+ assert.equal((await agent.post('/panel/weryfikacja').type('form').send({_csrf,name:owner.name,phone:owner.phone,iban,bankConsent:'on'})).status,302);
+ const updated=db.prepare('SELECT * FROM users WHERE id=?').get(owner.id);assert.equal(updated.verification_code,null);assert.equal(updated.verification_started_at,null);assert.equal(updated.bank_notification_seen,0);db.close();
+});
+test('verification polling is private, uncached, reflects incoming mail and never rotates the code',async()=>{
+ const {app,db}=setup();
+ assert.equal((await request(app).get('/api/weryfikacja/status')).status,401);
+ const owner=await addUser(db,{verification_status:'pending'}),other=await addUser(db,{verification_status:'pending'});
+ db.prepare("UPDATE users SET bank_notification_seen=0,verification_code='A7BC',verification_started_at=? WHERE id=?").run('2026-10-30T00:00:00.000Z',owner.id);
+ const agent=request.agent(app);await login(agent,owner);
+ const response=await agent.get('/api/weryfikacja/status');
+ assert.match(response.headers['cache-control'],/no-store/);
+ assert.deepEqual(response.body,{notificationSeen:false,status:'pending',startedAt:'2026-10-30T00:00:00.000Z'});
+ assert.equal(db.prepare('SELECT verification_code FROM users WHERE id=?').get(owner.id).verification_code,'A7BC');
+ db.prepare('UPDATE users SET bank_notification_seen=1 WHERE id=?').run(owner.id);
+ assert.equal((await agent.get('/api/weryfikacja/status')).body.notificationSeen,true);
+ const otherAgent=request.agent(app);await login(otherAgent,other);
+ assert.equal((await otherAgent.get('/api/weryfikacja/status')).body.startedAt,null);
+ db.close();
+});
 test('publishing requires verified organizer and explicit operator review; editing removes publication',async()=>{
  const {app,db}=setup();const owner=await addUser(db),admin=await addUser(db,{role:'admin'});
+ enableMfa(db,admin);
  const agent=request.agent(app),_csrf=await login(agent,owner);
  const body={_csrf,title:'Pomóżmy wspólnie naszej okolicy',summary:'Przejrzysta testowa zbiórka dla naszej społeczności i wszystkich sąsiadów.',story:'Wspólna historia testowa z jasno opisanym celem i budżetem. '.repeat(4),goal:'1000',category:'spolecznosc',location:'Radzymin',cover:'community',deadline:'',action:'submit'};
  assert.equal((await agent.post('/panel/nowa-zbiorka').type('form').send(body)).status,302);
@@ -80,6 +127,7 @@ test('expired campaigns cannot accept new intents and archived pages remain read
 
 test('operator cannot approve without bank notification and suspension closes campaigns',async()=>{
  const {app,db}=setup();const admin=await addUser(db,{role:'admin'}),organizer=await addUser(db,{verification_status:'pending'});
+ enableMfa(db,admin);
  db.prepare('UPDATE users SET bank_notification_seen=0 WHERE id=?').run(organizer.id);
  const agent=request.agent(app),_csrf=await login(agent,admin);
  assert.equal((await agent.post(`/admin/organizator/${organizer.id}`).type('form').send({_csrf,action:'verify',note:'Sprawdzono dane właściciela i numer BLIK.'})).status,409);

@@ -6,15 +6,19 @@ import { randomUUID, timingSafeEqual, createHmac, createHash } from 'node:crypto
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { z } from 'zod';
+import QRCode from 'qrcode';
 import { audit, now, transaction } from './db.js';
-import { notificationAddress, verificationCode, todayWarsaw, categories, covers, money, token, hash, passwordHash, passwordMatches, registrationSchema, bankSchema, campaignSchema, toCents, slugify } from './domain.js';
+import { notificationAddress, verificationCode, todayWarsaw, categories, covers, money, token, hash, passwordHash, passwordMatches, passwordNeedsRehash, dummyPasswordHash, registrationSchema, bankSchema, campaignSchema, toCents, slugify } from './domain.js';
+import { SqliteRateLimitStore } from './rate-limits.js';
+import { createMfaSecret, mfaTotp, encryptMfaSecret, decryptMfaSecret, mfaStep, consumeMfaCode, createRecoveryCodes } from './mfa.js';
 import { createMailer } from './email.js';
 import { authenticateBankMail, ingestAuthenticatedMail } from './bank.js';
+import { recordRejectedBankMail, preserveQuarantinedBankMail } from './bank-quarantine.js';
 
 export { verificationCode } from './domain.js';
 const sessionDuration = 1000 * 60 * 60 * 24 * 7;
 const safeEqual = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-const aggregate = `SELECT c.*, u.name organizer, u.verification_status, COALESCE((SELECT SUM(amount) FROM donations d WHERE d.campaign_id=c.id AND d.status='confirmed'),0) raised, (SELECT COUNT(*) FROM donations d WHERE d.campaign_id=c.id AND d.status='confirmed') supporters FROM campaigns c JOIN users u ON u.id=c.owner_id`;
+const aggregate = `SELECT c.*, u.name organizer, u.verification_status, t.raised, t.supporters FROM campaigns c JOIN users u ON u.id=c.owner_id JOIN campaign_totals t ON t.campaign_id=c.id`;
 const available = () => `c.status='published' AND u.verification_status='verified' AND (c.deadline IS NULL OR c.deadline='' OR c.deadline >= '${todayWarsaw()}')`;
 const statuses = { draft: 'Szkic', pending: 'Czeka na publikację', published: 'Opublikowana', closed: 'Zakończona', rejected: 'Wymaga poprawy' };
 // Content hash of every static asset: changes on each deploy that touches CSS, JS, images or brand files,
@@ -50,8 +54,9 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     if (!safeEqual(signature, expected)) return res.sendStatus(401);
     const event = await authenticateBankMail(req.body, config);
     if (event.rejected) {
-      db.prepare("INSERT OR IGNORE INTO bank_messages(id,fingerprint,status,reason,received_at) VALUES (?,?,'rejected',?,?)").run(randomUUID(), hash(req.body), event.rejected, now());
-    } else ingestAuthenticatedMail(db, config, event);
+      if (event.diagnostics) console.warn('Bank mail signature policy:', JSON.stringify(event.diagnostics));
+      recordRejectedBankMail(db, config, req.body, event);
+    } else if (ingestAuthenticatedMail(db, config, event) === 'quarantined') preserveQuarantinedBankMail(db, config, req.body);
     res.sendStatus(204);
   });
   app.use(express.urlencoded({ extended: false, limit: '40kb' }));
@@ -60,38 +65,57 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   const cookieOptions = { httpOnly: true, secure: config.production, sameSite: 'lax', path: '/' };
   const sessionCookie = config.production ? '__Host-br_session' : 'br_session';
   const csrfCookie = config.production ? '__Host-br_csrf' : 'br_csrf';
+  const mfaCookie = config.production ? '__Host-br_mfa' : 'br_mfa';
   app.use((req, res, next) => {
     req.user = null;
     const raw = req.cookies[sessionCookie];
     if (raw && /^[a-f0-9]{64}$/.test(raw)) {
-      const session = db.prepare('SELECT u.*, s.csrf FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires_at>?').get(hash(raw), Date.now());
-      if (session) req.user = session;
+      const session = db.prepare('SELECT u.*, s.csrf, s.mfa_verified, s.hash session_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires_at>?').get(hash(raw), Date.now());
+      if (session && (!session.mfa_secret || session.mfa_verified)) req.user = session;
     }
+    const challenge = req.cookies[mfaCookie];
+    req.mfaChallenge = !req.user && /^[a-f0-9]{64}$/.test(challenge || '') ? db.prepare('SELECT * FROM mfa_challenges WHERE hash=? AND expires_at>?').get(hash(challenge), Date.now()) : null;
     const existing = req.cookies[csrfCookie];
-    req.csrf = req.user?.csrf || (/^[a-f0-9]{64}$/.test(existing || '') ? existing : token());
+    req.csrf = req.user?.csrf || req.mfaChallenge?.csrf || (/^[a-f0-9]{64}$/.test(existing || '') ? existing : token());
     if (!req.user && req.csrf !== existing) res.cookie(csrfCookie, req.csrf, cookieOptions);
     res.locals = { asset, user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode, notificationAddress };
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       if (req.get('origin') && req.get('origin') !== config.baseUrl) return res.status(403).render('error', { title: 'Niedozwolone żądanie', message: 'Otwórz formularz ponownie na tej stronie.' });
       if (!safeEqual(req.body?._csrf || req.get('x-csrf-token'), req.csrf)) return res.status(403).render('error', { title: 'Formularz wygasł', message: 'Odśwież stronę i spróbuj ponownie.' });
     }
-    if (req.user || /^\/(panel|admin|logowanie|rejestracja|potwierdz|nowe-haslo)/.test(req.path)) res.set('Cache-Control', 'no-store');
+    if (req.user || /^\/(panel|admin|logowanie|rejestracja|potwierdz|nowe-haslo|odzyskaj-haslo)/.test(req.path)) res.set('Cache-Control', 'no-store');
     next();
   });
-  const limiter = (max, windowMs = 15 * 60 * 1000) => rateLimit({ windowMs, limit: max, standardHeaders: 'draft-8', legacyHeaders: false, handler: (req, res) => res.status(429).render('error', { title: 'Chwila przerwy', message: 'Zbyt wiele prób. Spróbuj ponownie za kilka minut.' }) });
-  const authLimit = limiter(15), donationLimit = limiter(30), readLimit = limiter(180, 60 * 1000);
+  const limiter = (bucket, max, windowMs = 15 * 60 * 1000, keyGenerator) => rateLimit({ windowMs, limit: max, store: new SqliteRateLimitStore(db, bucket), ...(keyGenerator ? { keyGenerator } : {}), standardHeaders: 'draft-8', legacyHeaders: false, handler: (req, res) => res.status(429).render('error', { title: 'Chwila przerwy', message: 'Zbyt wiele prób. Spróbuj ponownie za kilka minut.' }) });
+  const authLimit = limiter('auth-ip', 15), donationLimit = limiter('donation-ip', 30), readLimit = limiter('polling-ip', 180, 60000);
+  const emailKey = req => String(req.body.email || '').trim().toLowerCase().slice(0, 254);
+  const loginAccountLimit = limiter('login-account', 10, 15 * 60000, emailKey);
+  const resetAccountLimit = limiter('reset-account', 5, 15 * 60000, emailKey);
+  const mfaLimit = limiter('mfa-account', 10, 15 * 60000, req => req.user?.id || req.mfaChallenge?.user_id || 'anonymous');
   const requireUser = (req, res, next) => req.user ? next() : res.redirect('/logowanie');
-  const requireAdmin = (req, res, next) => req.user?.role === 'admin' ? next() : res.status(403).render('error', { title: 'Brak dostępu', message: 'Ta strona jest dostępna dla operatora instancji.' });
+  const requireAdmin = (req, res, next) => req.user?.role === 'admin' && req.user.mfa_secret && req.user.mfa_verified ? next() : res.status(403).render('error', { title: 'Brak dostępu', message: 'Ta strona wymaga konta operatora i logowania dwuetapowego.' });
+  app.use((req, res, next) => {
+    if (req.user?.role !== 'admin' || req.user.mfa_secret || ['/panel/bezpieczenstwo', '/panel/bezpieczenstwo/2fa/start', '/panel/bezpieczenstwo/2fa/potwierdz', '/wyloguj', '/healthz'].includes(req.path)) return next();
+    if (['GET', 'HEAD'].includes(req.method)) return res.redirect('/panel/bezpieczenstwo');
+    return res.status(403).render('error', { title: 'Włącz logowanie dwuetapowe', message: 'Konto operatora wymaga skonfigurowania aplikacji Authenticator przed dalszą pracą.' });
+  });
   const formError = (res, view, error, extra = {}) => res.status(422).render(view, { error: error instanceof z.ZodError ? error.issues[0].message : error.message, ...extra });
-  const createSession = (res, userId) => {
-    const raw = token();
+  const createSession = (res, userId, mfaVerified = false) => {
+    const raw = token(), csrf = token();
     db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
-    db.prepare('INSERT INTO sessions(hash,user_id,csrf,expires_at) VALUES (?,?,?,?)').run(hash(raw), userId, token(), Date.now() + sessionDuration);
+    db.prepare('INSERT INTO sessions(hash,user_id,csrf,expires_at,mfa_verified) VALUES (?,?,?,?,?)').run(hash(raw), userId, csrf, Date.now() + sessionDuration, Number(mfaVerified));
+    res.locals.csrf = csrf;
     res.cookie(sessionCookie, raw, { ...cookieOptions, maxAge: sessionDuration });
+    res.clearCookie(mfaCookie, cookieOptions);
+  };
+  const revokeAccess = userId => {
+    db.prepare('DELETE FROM sessions WHERE user_id=?').run(userId);
+    db.prepare('DELETE FROM mfa_challenges WHERE user_id=?').run(userId);
   };
   const campaignBySlug = slug => db.prepare(`${aggregate} WHERE c.slug=?`).get(slug);
-  const dashboard = id => ({
-    campaigns: db.prepare(`${aggregate} WHERE c.owner_id=? ORDER BY c.created_at DESC`).all(id),
+  const dashboard = (id, page) => ({
+    campaigns: db.prepare(`${aggregate} WHERE c.owner_id=? ORDER BY c.created_at DESC,c.id LIMIT 12 OFFSET ?`).all(id, (page - 1) * 12),
+    stats: db.prepare('SELECT COUNT(*) count,COALESCE(SUM(t.raised),0) raised,COALESCE(SUM(t.supporters),0) supporters FROM campaigns c JOIN campaign_totals t ON t.campaign_id=c.id WHERE c.owner_id=?').get(id),
     donations: db.prepare(`SELECT d.*,c.title campaign_title,c.slug FROM donations d JOIN campaigns c ON d.campaign_id=c.id WHERE c.owner_id=? AND d.status='confirmed' ORDER BY d.confirmed_at DESC LIMIT 20`).all(id),
   });
 
@@ -129,15 +153,49 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     res.redirect('/panel?notice=registered');
   });
   app.get('/logowanie', (req, res) => req.user ? res.redirect('/panel') : res.render('auth', { title: 'Dobrze Cię widzieć', mode: 'login' }));
-  app.post('/logowanie', authLimit, async (req, res) => {
+  app.post('/logowanie', authLimit, loginAccountLimit, async (req, res) => {
     const email = String(req.body.email || '').trim().toLowerCase(), password = String(req.body.password || '').slice(0, 129);
     const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
     // Always perform scrypt to avoid an inexpensive account-existence timing oracle.
-    const dummy = '0123456789abcdef0123456789abcdef:' + '0'.repeat(128);
-    const correct = await passwordMatches(password, user?.password || dummy);
+    const correct = await passwordMatches(password, user?.password || dummyPasswordHash);
     if (!user || !correct) return res.status(401).render('auth', { mode: 'login', error: 'Niepoprawny e-mail lub hasło.', values: { email } });
+    const upgraded = passwordNeedsRehash(user.password) ? await passwordHash(password) : user.password;
+    // Password reset or MFA enrollment may have finished while scrypt ran.
+    const current = db.prepare('SELECT * FROM users WHERE id=? AND password=?').get(user.id, user.password);
+    if (!current) return res.status(401).render('auth', { mode: 'login', error: 'Dane logowania zmieniły się. Spróbuj ponownie.', values: { email } });
+    if (upgraded !== current.password) db.prepare('UPDATE users SET password=? WHERE id=? AND password=?').run(upgraded, current.id, current.password);
     if (req.cookies[sessionCookie]) db.prepare('DELETE FROM sessions WHERE hash=?').run(hash(req.cookies[sessionCookie]));
-    createSession(res, user.id); res.redirect('/panel');
+    if (req.cookies[mfaCookie]) db.prepare('DELETE FROM mfa_challenges WHERE hash=?').run(hash(req.cookies[mfaCookie]));
+    if (current.mfa_secret) {
+      const raw = token();
+      db.prepare('DELETE FROM mfa_challenges WHERE expires_at<=?').run(Date.now());
+      // Bound outstanding challenges per account; an abandoned browser never becomes a session.
+      db.prepare('DELETE FROM mfa_challenges WHERE user_id=?').run(current.id);
+      db.prepare('INSERT INTO mfa_challenges(hash,user_id,csrf,expires_at) VALUES (?,?,?,?)').run(hash(raw), current.id, token(), Date.now() + 5 * 60000);
+      res.clearCookie(sessionCookie, cookieOptions);
+      res.cookie(mfaCookie, raw, { ...cookieOptions, maxAge: 5 * 60000 });
+      return res.redirect('/logowanie/2fa');
+    }
+    createSession(res, user.id); res.redirect(current.role === 'admin' ? '/panel/bezpieczenstwo' : '/panel');
+  });
+  app.get('/logowanie/2fa', (req, res) => {
+    if (!req.mfaChallenge) return res.redirect('/logowanie');
+    res.render('mfa-login', { title: 'Potwierdź logowanie' });
+  });
+  app.post('/logowanie/2fa', authLimit, mfaLimit, (req, res) => {
+    if (!req.mfaChallenge) return res.redirect('/logowanie');
+    const userId = transaction(db, () => {
+      const challenge = db.prepare('SELECT * FROM mfa_challenges WHERE hash=? AND expires_at>?').get(req.mfaChallenge.hash, Date.now());
+      if (!challenge) return null;
+      const user = db.prepare('SELECT * FROM users WHERE id=?').get(challenge.user_id);
+      if (!consumeMfaCode(db, config, user, req.body.code)) return null;
+      db.prepare('DELETE FROM mfa_challenges WHERE hash=?').run(challenge.hash);
+      createSession(res, user.id, true);
+      audit(db, user.id, 'mfa_login', user.id);
+      return user.id;
+    });
+    if (!userId) return res.status(401).render('mfa-login', { title: 'Potwierdź logowanie', error: 'Kod jest niepoprawny, wygasł lub został już użyty.' });
+    res.redirect('/panel');
   });
   app.post('/wyloguj', requireUser, (req, res) => {
     db.prepare('DELETE FROM sessions WHERE hash=?').run(hash(req.cookies[sessionCookie]));
@@ -162,7 +220,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     catch { res.redirect('/panel?notice=mail-error'); }
   });
   app.get('/odzyskaj-haslo', (req, res) => res.render('auth', { title: 'Odzyskaj dostęp', mode: 'forgot' }));
-  app.post('/odzyskaj-haslo', authLimit, async (req, res) => {
+  app.post('/odzyskaj-haslo', authLimit, resetAccountLimit, async (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE email=?').get(String(req.body.email || '').trim().toLowerCase());
     if (user && !config.demo) { try { await sendMail(user, 'reset'); } catch { /* Generic response prevents enumeration. */ } }
     res.render('auth', { mode: 'forgot', notice: 'Jeśli ten adres jest zarejestrowany, otrzymasz link do zmiany hasła.' });
@@ -173,27 +231,106 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     const password = String(req.body.password || '');
     if (!record || password.length < 12 || password.length > 128 || config.demo) return res.status(400).render('auth', { mode: 'reset', resetToken: req.body.token, error: 'Link jest nieważny lub hasło nie ma od 12 do 128 znaków.' });
     const encoded = await passwordHash(password);
-    transaction(db, () => { db.prepare('UPDATE users SET password=? WHERE id=?').run(encoded, record.user_id); db.prepare('DELETE FROM tokens WHERE user_id=?').run(record.user_id); db.prepare('DELETE FROM sessions WHERE user_id=?').run(record.user_id); });
-    res.clearCookie(sessionCookie, cookieOptions); res.redirect('/logowanie');
+    const changed = transaction(db, () => {
+      const consumed = db.prepare("DELETE FROM tokens WHERE hash=? AND purpose='reset' AND expires_at>? RETURNING user_id").get(record.hash, Date.now());
+      if (!consumed) return false;
+      db.prepare('UPDATE users SET password=? WHERE id=?').run(encoded, consumed.user_id);
+      db.prepare('DELETE FROM tokens WHERE user_id=?').run(consumed.user_id);
+      revokeAccess(consumed.user_id);
+      audit(db, consumed.user_id, 'password_reset', consumed.user_id);
+      return true;
+    });
+    if (!changed) return res.status(400).render('auth', { mode: 'reset', resetToken: '', error: 'Link wygasł lub został już użyty. Poproś o nową wiadomość.' });
+    res.clearCookie(sessionCookie, cookieOptions); res.clearCookie(mfaCookie, cookieOptions); res.redirect('/logowanie');
+  });
+
+  const securityPage = async (req, res, extra = {}) => {
+    const enrollment = db.prepare('SELECT * FROM mfa_enrollments WHERE user_id=? AND session_hash=? AND expires_at>?').get(req.user.id, req.user.session_hash, Date.now());
+    const secret = enrollment && !req.user.mfa_secret ? decryptMfaSecret(config, req.user.id, enrollment.secret) : null;
+    const qr = secret ? await QRCode.toDataURL(mfaTotp(secret, req.user.email).toString(), { width: 256, margin: 2 }) : null;
+    return res.render('security', { title: 'Bezpieczeństwo konta', secret, qr, recoveryCodes: null, remainingCodes: db.prepare('SELECT COUNT(*) count FROM mfa_recovery_codes WHERE user_id=?').get(req.user.id).count, ...extra });
+  };
+  app.get('/panel/bezpieczenstwo', requireUser, (req, res) => securityPage(req, res));
+  app.post('/panel/bezpieczenstwo/2fa/start', requireUser, authLimit, mfaLimit, async (req, res) => {
+    if (config.demo || req.user.mfa_secret) return res.sendStatus(409);
+    if (!await passwordMatches(String(req.body.password || '').slice(0, 129), req.user.password)) { res.status(401); return securityPage(req, res, { error: 'Niepoprawne hasło.' }); }
+    const encrypted = encryptMfaSecret(config, req.user.id, createMfaSecret());
+    const started = transaction(db, () => {
+      const session = db.prepare('SELECT u.password,u.mfa_secret FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.hash=? AND s.expires_at>?').get(req.user.session_hash, Date.now());
+      if (!session || session.password !== req.user.password || session.mfa_secret) return false;
+      db.prepare('DELETE FROM mfa_enrollments WHERE expires_at<=?').run(Date.now());
+      db.prepare('INSERT INTO mfa_enrollments(user_id,session_hash,secret,expires_at) VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET session_hash=excluded.session_hash,secret=excluded.secret,expires_at=excluded.expires_at').run(req.user.id, req.user.session_hash, encrypted, Date.now() + 10 * 60000);
+      return true;
+    });
+    if (!started) return res.redirect('/logowanie');
+    res.redirect('/panel/bezpieczenstwo');
+  });
+  app.post('/panel/bezpieczenstwo/2fa/potwierdz', requireUser, authLimit, mfaLimit, (req, res) => {
+    if (config.demo || req.user.mfa_secret) return res.sendStatus(409);
+    const codes = transaction(db, () => {
+      const enrollment = db.prepare('SELECT * FROM mfa_enrollments WHERE user_id=? AND session_hash=? AND expires_at>?').get(req.user.id, req.user.session_hash, Date.now());
+      if (!enrollment) return null;
+      const step = mfaStep(decryptMfaSecret(config, req.user.id, enrollment.secret), String(req.body.code || '').replace(/\s/g, ''));
+      if (step === null) return null;
+      db.prepare('UPDATE users SET mfa_secret=?,mfa_last_step=? WHERE id=?').run(enrollment.secret, step, req.user.id);
+      const recoveryCodes = createRecoveryCodes(db, req.user.id);
+      revokeAccess(req.user.id);
+      createSession(res, req.user.id, true);
+      audit(db, req.user.id, 'mfa_enabled', req.user.id);
+      return recoveryCodes;
+    });
+    if (!codes) return res.status(400).render('error', { title: 'Nie udało się włączyć 2FA', message: 'Sprawdź aktualny kod w aplikacji. Konfiguracja wygasa po 10 minutach; możesz rozpocząć ją ponownie.' });
+    req.user.mfa_secret = 'enabled';
+    res.render('security', { title: 'Zapisz kody odzyskiwania', secret: null, qr: null, recoveryCodes: codes, remainingCodes: codes.length, notice: 'Logowanie dwuetapowe jest włączone. Zapisz kody odzyskiwania w bezpiecznym miejscu.' });
+  });
+  app.post('/panel/bezpieczenstwo/2fa/wylacz', requireUser, authLimit, mfaLimit, async (req, res) => {
+    if (config.demo || req.user.role === 'admin' || !req.user.mfa_secret) return res.status(403).render('error', { title: '2FA jest wymagane', message: 'Konto operatora musi mieć włączone logowanie dwuetapowe.' });
+    if (!await passwordMatches(String(req.body.password || '').slice(0, 129), req.user.password)) { res.status(401); return securityPage(req, res, { error: 'Niepoprawne hasło.' }); }
+    const disabled = transaction(db, () => {
+      const user = db.prepare('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.hash=? AND s.expires_at>?').get(req.user.session_hash, Date.now());
+      if (!user || user.role === 'admin' || user.password !== req.user.password || !consumeMfaCode(db, config, user, req.body.code)) return false;
+      db.prepare('UPDATE users SET mfa_secret=NULL,mfa_last_step=NULL WHERE id=?').run(user.id);
+      db.prepare('DELETE FROM mfa_recovery_codes WHERE user_id=?').run(user.id);
+      revokeAccess(user.id);
+      createSession(res, user.id);
+      audit(db, user.id, 'mfa_disabled', user.id);
+      return true;
+    });
+    if (!disabled) return res.status(401).render('error', { title: 'Nie udało się wyłączyć 2FA', message: 'Sprawdź hasło i użyj aktualnego kodu lub kodu odzyskiwania.' });
+    res.redirect('/panel/bezpieczenstwo');
   });
 
   app.get('/panel', requireUser, (req, res) => {
     const notices = { registered: 'Konto utworzone. Sprawdź pocztę i potwierdź adres e-mail.', 'verified-email': 'Adres e-mail potwierdzony.', 'mail-sent': 'Wiadomość wysłana. Sprawdź swoją skrzynkę.', 'mail-error': 'Nie udało się wysłać wiadomości. Spróbuj ponownie lub skontaktuj się z operatorem.', 'bank-sent': 'Dane wysłane do weryfikacji. Teraz skonfiguruj powiadomienia bankowe.', saved: 'Zmiany zapisane.', submitted: 'Zbiórka czeka na sprawdzenie przez operatora.' };
-    res.render('dashboard', { title: 'Twoje centrum pomagania', ...dashboard(req.user.id), notice: notices[req.query.notice] || null });
+    const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.strona, 10) || 1));
+    res.render('dashboard', { title: 'Twoje centrum pomagania', ...dashboard(req.user.id, page), page, notice: notices[req.query.notice] || null });
   });
   app.get('/panel/weryfikacja', requireUser, (req, res) => res.render('bank', { title: 'Weryfikacja organizatora', values: req.user }));
-  app.post('/panel/weryfikacja', requireUser, limiter(10), (req, res) => {
+  app.get('/api/weryfikacja/status', readLimit, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (!req.user) return res.sendStatus(401);
+    res.json({ notificationSeen: Boolean(req.user.bank_notification_seen), status: req.user.verification_status, startedAt: req.user.verification_started_at || null });
+  });
+  app.post('/panel/weryfikacja', requireUser, limiter('bank-submit-user', 10, 15 * 60000, req => req.user.id), (req, res) => {
     if (config.demo || ['verified', 'pending'].includes(req.user.verification_status)) return res.status(409).render('error', { title: 'Dane są zablokowane', message: 'Zmianę danych płatniczych uzgodnij z operatorem. Wymaga ponownej weryfikacji.' });
     if (!req.user.email_verified) return formError(res, 'bank', new Error('Najpierw potwierdź adres e-mail.'), { values: req.body });
     try {
       const data = bankSchema.parse(req.body);
-      db.prepare("UPDATE users SET name=?,phone=?,iban=?,verification_status='pending',verification_note='',bank_notification_seen=0,submitted_at=? WHERE id=?").run(data.name, data.phone, data.iban, now(), req.user.id);
+      db.prepare("UPDATE users SET name=?,phone=?,iban=?,verification_status='pending',verification_note='',bank_notification_seen=0,verification_code=NULL,verification_started_at=NULL,submitted_at=? WHERE id=?").run(data.name, data.phone, data.iban, now(), req.user.id);
       audit(db, req.user.id, 'verification_submitted', req.user.id);
       res.redirect('/panel?notice=bank-sent');
     } catch (error) { formError(res, 'bank', error, { values: req.body }); }
   });
+  app.post('/panel/weryfikacja/test', requireUser, limiter('bank-test-user', 10, 15 * 60000, req => req.user.id), (req, res) => {
+    if (config.demo || req.user.verification_status !== 'pending' || !req.user.email_verified || !req.user.iban || !req.user.phone || req.user.bank_notification_seen) return res.status(409).render('error', { title: 'Nie można uruchomić testu', message: 'Test wymaga potwierdzonego e-maila i zgłoszonych danych rachunku. Odebrany test czeka na decyzję operatora.' });
+    let code;
+    do { code = token(2).toUpperCase(); } while (code === verificationCode(req.user));
+    db.prepare('UPDATE users SET verification_code=?,verification_started_at=? WHERE id=?').run(code, now(), req.user.id);
+    audit(db, req.user.id, 'bank_test_started', req.user.id);
+    res.redirect('/panel/weryfikacja');
+  });
   app.get('/panel/nowa-zbiorka', requireUser, (req, res) => res.render('editor', { title: 'Zacznij coś dobrego', campaign: null }));
-  app.post('/panel/nowa-zbiorka', requireUser, limiter(20), (req, res) => saveCampaign(req, res));
+  app.post('/panel/nowa-zbiorka', requireUser, limiter('campaign-create-user', 20, 15 * 60000, req => req.user.id), (req, res) => saveCampaign(req, res));
   app.get('/panel/zbiorki/:id/edytuj', requireUser, (req, res) => {
     const campaign = db.prepare('SELECT * FROM campaigns WHERE id=? AND owner_id=?').get(req.params.id, req.user.id);
     if (!campaign) return res.status(404).render('error', { title: 'Nie ma takiej zbiórki', message: 'Sprawdź adres strony.' });
@@ -264,7 +401,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     res.render('admin', { title: 'Panel operatora',
       organizers: db.prepare("SELECT * FROM users WHERE verification_status IN ('pending','verified') ORDER BY submitted_at").all(),
       campaigns: db.prepare(`${aggregate} WHERE c.status='pending' ORDER BY c.updated_at`).all(),
-      messages: db.prepare('SELECT b.*,u.name organizer FROM bank_messages b LEFT JOIN users u ON u.id=b.owner_id WHERE b.status NOT IN (\'matched\',\'verification\') ORDER BY b.received_at DESC LIMIT 50').all(),
+      messages: db.prepare('SELECT b.*,u.name organizer FROM bank_messages b LEFT JOIN users u ON u.id=b.owner_id WHERE b.status NOT IN (\'matched\',\'verification\',\'ignored\') ORDER BY b.received_at DESC LIMIT 50').all(),
       audits: db.prepare('SELECT a.*,u.name actor FROM audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 30').all(),
     });
   });
@@ -294,6 +431,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     if (res.headersSent) return next(error);
     if (req.path === '/api/bank-mail') return res.sendStatus(error.status === 413 ? 413 : 503);
     console.error('Request failed:', error.code || error.name);
+    if (error.code === 'AUTH_BUSY' || error.code === 'MFA_NOT_CONFIGURED') return res.status(503).set('Retry-After', '5').render('error', { title: 'Logowanie chwilowo niedostępne', message: error.code === 'AUTH_BUSY' ? 'Spróbuj ponownie za chwilę.' : 'Logowanie dwuetapowe wymaga konfiguracji instancji. Skontaktuj się z operatorem.' });
     res.status(error.status === 413 ? 413 : 500).render('error', { title: 'Nie udało się dokończyć operacji', message: 'Spróbuj ponownie za chwilę. Jeśli problem się powtarza, skontaktuj się z operatorem.' });
   });
   return app;

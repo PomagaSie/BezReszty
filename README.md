@@ -87,7 +87,21 @@ Skonfiguruj osobnego Workera i aliasy bankowych powiadomień według [MAIL.md](d
 docker compose exec app node scripts/admin.js twoj-email@example.pl
 ```
 
-Zaloguj się ponownie i otwórz `/admin`. Rola operatora nie jest dostępna z formularza rejestracji. Procedura sprawdzania organizatora jest w [VERIFICATION.md](docs/VERIFICATION.md). Uzupełnij rzeczywiste dane operatora, zasady i retencję danych dla swojej instancji przed przyjmowaniem zgłoszeń.
+Zaloguj się ponownie i skonfiguruj aplikację Authenticator w `/panel/bezpieczenstwo`, a następnie otwórz `/admin`. Rola operatora wymaga 2FA i nie jest dostępna z formularza rejestracji. Procedura sprawdzania organizatora jest w [VERIFICATION.md](docs/VERIFICATION.md). Uzupełnij rzeczywiste dane operatora, zasady i retencję danych dla swojej instancji przed przyjmowaniem zgłoszeń.
+
+### Authenticator i odzyskiwanie dostępu
+
+Organizator może opcjonalnie włączyć 2FA w „Bezpieczeństwo konta i 2FA” w panelu. Dla operatora jest ono obowiązkowe, również na istniejącym koncie po aktualizacji. Po potwierdzeniu hasła zeskanuj lokalnie wygenerowany kod QR lub wpisz klucz w aplikacji obsługującej TOTP (np. Google Authenticator, Microsoft Authenticator). Potwierdź kodem z aplikacji i zapisz dziesięć jednorazowych kodów odzyskiwania; aplikacja pokazuje je tylko raz. Każdy kod TOTP również działa tylko raz, więc po jego wykorzystaniu poczekaj na nowy. Serwer i telefon powinny mieć prawidłowo ustawiony czas.
+
+Klucze TOTP są szyfrowane AES-256-GCM. Ustaw stały, losowy `MFA_ENCRYPTION_KEY` (minimum 32 znaki) **przed pierwszą konfiguracją 2FA**. Bez tej zmiennej aplikacja korzysta z `BANK_WEBHOOK_SECRET`; instalacja wyłącznie IMAP wymaga osobnego klucza. Klucz zachowaj niezależnie od kopii bazy. Zmiana efektywnego klucza, również przejście z fallbacku na osobny klucz, wymaga migracji sekretów lub ponownej konfiguracji 2FA. Do wygenerowania użyj np. `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` i zapisz wynik wyłącznie w chronionym pliku środowiska.
+
+Reset hasła nie wyłącza 2FA. Zmiany 2FA i reset hasła unieważniają wcześniejsze sesje i rozpoczęte logowania. Użytkownik bez telefonu może zalogować się kodem odzyskiwania. Jeśli utraci oba sposoby, administrator serwera po niezależnym sprawdzeniu właściciela konta może wykonać:
+
+```sh
+docker compose exec app node scripts/admin.js adres-konta@example.pl --reset-mfa
+```
+
+Polecenie resetuje wyłącznie 2FA, nie nadaje roli operatora. Zapisuje zdarzenie w audycie i wylogowuje konto. Operator musi ponownie skonfigurować Authenticator przed uzyskaniem dostępu.
 
 ### Aktualizacje i kopie
 
@@ -117,17 +131,25 @@ Odtwarzaj przy zatrzymanej aplikacji: zastąp `bezreszty.sqlite` sprawdzoną kop
 ## Testy
 
 ```sh
+npm ci --ignore-scripts
+npm ci --ignore-scripts --prefix email-worker
 npm run check
 npm test
 npm audit --omit=dev --audit-level=high
 docker build -f deploy/Dockerfile -t bezreszty:local .
 ```
 
+`npm test` uruchamia również testy Email Workera w Miniflare/workerd: rzeczywisty handler `email()`, zgodność surowych bajtów i HMAC, oczekiwanie na zapis w backendzie, odrzucanie przekierowań i błędów sieci oraz kontrolę adresów i limitu 256 KiB. Sam Worker: `npm --prefix email-worker test`. Testy korzystają wyłącznie z lokalnego backendu testowego, bez wysyłania poczty i wykonywania przelewów.
+
 Testy obejmują kryptograficzny podpis DKIM, podmienione i niepodpisane wiadomości, niezgodne kwoty i rachunki, duplikaty, izolację organizatorów, moderację, CSRF, weryfikację e-maila i unieważnianie sesji po zmianie hasła. Nie wykonują przelewów i nie łączą się z bankiem. Prawdziwy przebieg SMTP oraz Alior → Worker/webhook (lub IMAP) wymaga końcowego testu na docelowej skrzynce.
 
 ## Architektura i ograniczenia
 
 Node.js 24 + Express + EJS + SQLite. Jeden proces aplikacji. Dedykowany Worker odbiera bankowe wiadomości i przesyła surowy RFC822 z podpisem HMAC; opcjonalny importer IMAP działa co 30 sekund, trwała baza w wolumenie. Kwoty są liczbami całkowitymi w groszach. Widoki są renderowane na serwerze; JavaScript obsługuje kopiowanie, udostępnianie i status wpłaty. Tryb demonstracyjny jest odseparowany od prawdziwych zbiórek.
+
+Tabela `campaign_totals` w tej samej bazie SQLite przechowuje sumę i liczbę potwierdzonych wpłat każdej zbiórki. Pierwsze uruchomienie po aktualizacji przelicza wcześniejsze dane raz, a triggery aktualizują agregaty przy dodaniu, potwierdzeniu, korekcie, przeniesieniu i usunięciu wpłaty, w tej samej transakcji. Odczyt stron nie sumuje całej historii wpłat; nie ma TTL ani dodatkowego serwisu cache. Panel organizatora ma paginację, a podsumowanie obejmuje wszystkie jego zbiórki. Najnowsze wpłaty korzystają z indeksu daty. Kontrolowane odtworzenie agregatów: `npm run cache:rebuild` (w kontenerze: `node scripts/rebuild-cache.js`).
+
+Limity żądań są przechowywane w SQLite i zachowują stan po restarcie. Logowanie ma niezależne limity według IP i konta; kody 2FA limitowane są także według konta. Scrypt używa profilu `N=16384,r=8,p=5` z ograniczoną kolejką i współbieżnością. Stare hashe są aktualizowane po poprawnym logowaniu. SQLite nadal pracuje synchronicznie; przy większym ruchu mierz opóźnienia i dodaj limity w zaufanym proxy.
 
 Integracja nie ma dostępu do historii rachunku przez API banku. E-mail jest zdarzeniem ewidencyjnym, a nie bankowym potwierdzeniem rozrachunku. Niepasujące wpłaty wymagają wyjaśnienia z organizatorem i sprawdzenia bankowej historii. Automatyczny import obsługuje tylko rozpoznany format powiadomień Aliora i wymagany podpis DKIM; zmiana formatu lub domen podpisu może wymagać aktualizacji parsera. Szczegóły: [MAIL.md](docs/MAIL.md), [SECURITY.md](SECURITY.md).
 

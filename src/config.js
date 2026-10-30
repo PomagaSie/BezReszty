@@ -6,6 +6,8 @@ export function readConfig(env = process.env) {
   const url = new URL(baseUrl);
   if (production && url.protocol !== 'https:') throw new Error('BASE_URL musi używać HTTPS w produkcji.');
   const demo = env.DEMO_MODE === 'true';
+  const mfaEncryptionKey = env.MFA_ENCRYPTION_KEY || env.BANK_WEBHOOK_SECRET || '';
+  if (production && !demo && mfaEncryptionKey.length < 32) throw new Error('Produkcja wymaga MFA_ENCRYPTION_KEY lub BANK_WEBHOOK_SECRET (minimum 32 znaki).');
   if (env.MAIL_RELAY_URL && new URL(env.MAIL_RELAY_URL).protocol !== 'https:') throw new Error('MAIL_RELAY_URL musi używać HTTPS.');
   if (production && !demo && (['NOTIFICATION_DOMAIN','OPERATOR_NAME'].some(key => !env[key]) || !(env.SMTP_HOST || (env.MAIL_RELAY_URL && env.MAIL_RELAY_KEY)) || !(env.IMAP_HOST || (env.BANK_WEBHOOK_SECRET?.length >= 32)))) {
     throw new Error('Produkcja wymaga SMTP lub relay, IMAP lub webhooka, domeny powiadomień i danych operatora. Sprawdź .env.example.');
@@ -15,6 +17,7 @@ export function readConfig(env = process.env) {
     host: env.HOST || '127.0.0.1', dbPath: env.DB_PATH || resolve('data/bezreszty.sqlite'),
     notificationPrefix: env.NOTIFICATION_PREFIX || '',
     bankWebhookSecret: env.BANK_WEBHOOK_SECRET || '',
+    mfaEncryptionKey,
     mailRelayUrl: env.MAIL_RELAY_URL || '', mailRelayKey: env.MAIL_RELAY_KEY || '',
     notificationDomain: env.NOTIFICATION_DOMAIN || 'powiadomienia.localhost',
     operatorName: env.OPERATOR_NAME || 'Operator instancji BezReszty',

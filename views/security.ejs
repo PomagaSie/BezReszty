@@ -1,0 +1,50 @@
+<%- include('partials/head') %>
+<main id="main" class="shell narrow section">
+  <section class="form-card">
+    <span class="eyebrow">BEZPIECZEŃSTWO KONTA</span>
+    <h1>Logowanie dwuetapowe</h1>
+    <p>Dodaj drugi etap logowania za pomocą aplikacji takiej jak Google Authenticator, Microsoft Authenticator lub innej obsługującej kody TOTP.</p>
+    <% if (user.role === 'admin' && !user.mfa_secret) { %><p class="alert">Konto operatora wymaga włączonego 2FA. Zakończ konfigurację, aby uzyskać dostęp do aplikacji.</p><% } %>
+    <% if (recoveryCodes) { %>
+      <h2>Zapisz kody odzyskiwania</h2>
+      <p>Każdy kod zastępuje jeden kod z aplikacji i działa tylko raz. Wyświetlamy je tylko teraz. Przechowuj je w menedżerze haseł lub w innym bezpiecznym miejscu poza telefonem.</p>
+      <ul class="recovery-codes"><% recoveryCodes.forEach(code => { %><li><code><%= code %></code></li><% }) %></ul>
+      <button class="button secondary" type="button" data-copy="<%= recoveryCodes.join('\n') %>">Kopiuj kody</button>
+      <p><a class="button" href="<%= user.role === 'admin' ? '/admin' : '/panel' %>">Kody zapisane — przejdź dalej →</a></p>
+    <% } else if (user.mfa_secret) { %>
+      <p class="alert success">Logowanie dwuetapowe jest włączone.</p>
+      <p>Pozostałe kody odzyskiwania: <strong><%= remainingCodes %></strong>.</p>
+      <% if (user.role !== 'admin') { %>
+        <h2>Wyłącz 2FA</h2>
+        <p>Potwierdź hasłem i kodem z aplikacji lub kodem odzyskiwania. Pozostałe sesje zostaną wylogowane.</p>
+        <form action="/panel/bezpieczenstwo/2fa/wylacz" method="post" data-confirm="Wyłączyć logowanie dwuetapowe?">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <label for="password">Aktualne hasło</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+          <label for="code">Kod uwierzytelniający</label><input id="code" name="code" type="text" autocomplete="one-time-code" maxlength="32" required>
+          <button class="button secondary" type="submit">Wyłącz 2FA</button>
+        </form>
+      <% } else { %><p>Operator nie może wyłączyć 2FA. W razie utraty dostępu użyj kodu odzyskiwania lub skontaktuj się z administratorem serwera.</p><% } %>
+    <% } else if (secret) { %>
+      <h2>Dodaj konto do aplikacji</h2>
+      <p>Zeskanuj kod QR w aplikacji Authenticator.</p>
+      <img src="<%= qr %>" width="256" height="256" class="mfa-qr" alt="Kod QR do konfiguracji aplikacji Authenticator">
+      <details><summary>Wpisz klucz ręcznie</summary><p class="mfa-secret"><code><%= secret %></code></p><p>Typ: TOTP, 6 cyfr, nowy kod co 30 sekund.</p></details>
+      <p>Klucz i kod QR traktuj jak hasło. Konfiguracja wygasa po 10 minutach.</p>
+      <form action="/panel/bezpieczenstwo/2fa/potwierdz" method="post">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <label for="code">Sześciocyfrowy kod z aplikacji</label><input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" maxlength="6" required>
+        <button class="button full" type="submit">Włącz 2FA →</button>
+      </form>
+    <% } else { %>
+      <p>2FA jest wyłączone. Potwierdź hasło, aby rozpocząć konfigurację.</p>
+      <form action="/panel/bezpieczenstwo/2fa/start" method="post">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <label for="password">Aktualne hasło</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+        <button class="button full" type="submit">Skonfiguruj Authenticator →</button>
+      </form>
+    <% } %>
+    <p><a class="text-link" href="/panel">Mój panel →</a></p>
+    <form action="/wyloguj" method="post"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="link-button" type="submit">Wyloguj się →</button></form>
+  </section>
+</main>
+<%- include('partials/footer') %>

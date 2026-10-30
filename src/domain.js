@@ -2,8 +2,22 @@ import { randomBytes, createHash, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from 'node:util';
 import { z } from 'zod';
 const scrypt = promisify(scryptCallback);
+// OWASP's 16 MiB scrypt profile; bound concurrency to protect small instances.
+const passwordCost = { N: 16384, r: 8, p: 5, maxmem: 32 * 1024 * 1024 };
+const passwordPrefix = 'scrypt$16384$8$5$';
+export const dummyPasswordHash = passwordPrefix + '0123456789abcdef0123456789abcdef$' + '0'.repeat(128);
+let hashing = 0;
+const hashQueue = [];
+async function derivePassword(password, salt, options) {
+  if (hashing >= 2) {
+    if (hashQueue.length >= 16) throw Object.assign(new Error('Password hashing busy'), { code: 'AUTH_BUSY' });
+    await new Promise(resolve => hashQueue.push(resolve));
+  } else hashing++;
+  try { return await scrypt(password, salt, 64, options); }
+  finally { const next = hashQueue.shift(); if (next) next(); else hashing--; }
+}
 export const todayWarsaw = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-export const verificationCode = user => `BR-KONTO-${user.id.replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+export const verificationCode = user => user.verification_code || null;
 export const notificationAddress = (user, config) => `${config.notificationPrefix || ''}${user.notification_alias}@${config.notificationDomain}`;
 export const categories = { zdrowie: 'Zdrowie', zwierzeta: 'Zwierzęta', spolecznosc: 'Społeczność', edukacja: 'Edukacja', marzenia: 'Marzenia', pomoc: 'Pilna pomoc' };
 export const covers = ['community', 'nature', 'care', 'education', 'animals', 'dream'];
@@ -34,11 +48,18 @@ export function slugify(text) {
 }
 export async function passwordHash(password) {
   const salt = token(16);
-  return `${salt}:${(await scrypt(password, salt, 64)).toString('hex')}`;
+  return `${passwordPrefix}${salt}$${(await derivePassword(password, salt, passwordCost)).toString('hex')}`;
 }
+export const passwordNeedsRehash = stored => !stored.startsWith(passwordPrefix);
 export async function passwordMatches(password, stored) {
-  const [salt, key] = stored.split(':');
-  const actual = await scrypt(password, salt, 64);
+  const current = typeof stored === 'string' && stored.startsWith(passwordPrefix);
+  const parts = typeof stored === 'string' ? stored.split(current ? '$' : ':') : [];
+  const [salt, key] = current ? parts.slice(4) : parts;
+  if (parts.length !== (current ? 6 : 2) || !/^[a-f0-9]{32}$/.test(salt || '') || !/^[a-f0-9]{128}$/.test(key || '')) {
+    await derivePassword(password, '0123456789abcdef0123456789abcdef', passwordCost);
+    return false;
+  }
+  const actual = await derivePassword(password, salt, current ? passwordCost : { ...passwordCost, p: 1 });
   const expected = Buffer.from(key, 'hex');
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }

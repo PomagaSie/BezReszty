@@ -15,3 +15,12 @@ test('isolated email worker forwards exact RFC822 bytes with HMAC and awaits dur
   let rejected=false;await worker.email({to:'somebody@bank.example.test',rawSize:1,setReject:()=>rejected=true},{NOTIFICATION_DOMAIN:'bank.example.test'});assert.equal(rejected,true);
  }finally{globalThis.fetch=oldFetch;}
 });
+test('email worker checks actual stream size even if rawSize understates it', async () => {
+ const oldFetch=globalThis.fetch;
+ globalThis.fetch=()=>assert.fail('Oversized bank mail must not leave the Worker');
+ try {
+  let reason;
+  await worker.email({to:`wplaty+${'a'.repeat(32)}@bank.example.test`,rawSize:1,raw:new Response(new Uint8Array(256*1024+1)).body,setReject:value=>{reason=value;}},{NOTIFICATION_DOMAIN:'bank.example.test'});
+  assert.equal(reason,'Wiadomość jest zbyt duża.');
+ } finally {globalThis.fetch=oldFetch;}
+});

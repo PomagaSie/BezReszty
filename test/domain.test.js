@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toCents, validAliorIban, accountMatches, passwordHash, passwordMatches } from '../src/domain.js';
+import { toCents, validAliorIban, accountMatches, passwordHash, passwordMatches, passwordNeedsRehash } from '../src/domain.js';
 import { parseAlior } from '../src/bank.js';
 import { iban } from './helpers.js';
 test('money uses exact integer grosze and rejects rounding/scientific notation/negative values',()=>{
@@ -15,6 +15,11 @@ test('Alior IBAN checksum and bank identifier are validated',()=>{
 test('passwords use salted scrypt and constant-time hash comparison',async()=>{
  const a=await passwordHash('haslo-do-testow-123'),b=await passwordHash('haslo-do-testow-123');
  assert.notEqual(a,b);assert.equal(await passwordMatches('haslo-do-testow-123',a),true);assert.equal(await passwordMatches('inne',a),false);
+ assert.match(a,/^scrypt\$16384\$8\$5\$/);assert.equal(passwordNeedsRehash(a),false);
+ const {scryptSync}=await import('node:crypto');const salt='1234567890abcdef1234567890abcdef';
+ const legacy=`${salt}:${scryptSync('stare-haslo-123',salt,64).toString('hex')}`;
+ assert.equal(passwordNeedsRehash(legacy),true);assert.equal(await passwordMatches('stare-haslo-123',legacy),true);
+ assert.equal(await passwordMatches('inne',legacy),false);assert.equal(await passwordMatches('inne','disabled'),false);
 });
 test('Alior parser supports HTML/plain text and requires consistent subject/body amount',()=>{
  const subject='Uznanie rachunku 96...0001 kwotą 1 234,56 PLN';

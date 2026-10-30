@@ -1,0 +1,17 @@
+<%- include('partials/head') %>
+<main id="main" class="shell narrow section">
+  <section class="form-card">
+    <span class="eyebrow">BEZPIECZNE LOGOWANIE</span>
+    <h1>Potwierdź logowanie</h1>
+    <p>Wpisz aktualny sześciocyfrowy kod z aplikacji Authenticator lub jeden z zapisanych kodów odzyskiwania. Każdy kod możesz wykorzystać tylko raz.</p>
+    <form action="/logowanie/2fa" method="post">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <label for="code">Kod uwierzytelniający</label>
+      <input id="code" name="code" type="text" autocomplete="one-time-code" maxlength="32" required autofocus>
+      <button class="button full" type="submit">Potwierdź logowanie →</button>
+    </form>
+    <p class="fine-print">Potwierdzenie logowania jest ważne przez 5 minut. Jeżeli utracisz aplikację i kody odzyskiwania, skontaktuj się z operatorem.</p>
+    <a class="text-link" href="/logowanie">Wróć do logowania →</a>
+  </section>
+</main>
+<%- include('partials/footer') %>

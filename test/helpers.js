@@ -3,10 +3,12 @@ import { openDatabase, now } from '../src/db.js';
 import { token, passwordHash } from '../src/domain.js';
 import { readConfig } from '../src/config.js';
 import { createApp } from '../src/app.js';
+import { createMfaSecret, encryptMfaSecret, mfaTotp } from '../src/mfa.js';
+export const testMfaKey = 'test-only-mfa-encryption-key-32-characters';
 export const iban='96249000000000000000000001';
 export function setup(extra={}) {
   const db=openDatabase(':memory:');
-  const config={...readConfig({}),...extra};
+  const config={...readConfig({}),mfaEncryptionKey:testMfaKey,...extra};
   const messages=[];
   const app=createApp({config,db,sendMail:async(user,purpose)=>{messages.push({user,purpose});}});
   return {db,config,app,messages};
@@ -31,7 +33,17 @@ export async function login(agent,user) {
   const value=await csrf(agent);
   const response=await agent.post('/logowanie').type('form').send({_csrf:value,email:user.email,password:'bezpieczne-haslo-123'});
   if(response.status!==302)throw new Error(`Login failed: ${response.status}`);
-  return csrf(agent,'/panel');
+  if (response.headers.location === '/logowanie/2fa') {
+    const _csrf = await csrf(agent, '/logowanie/2fa');
+    const verified = await agent.post('/logowanie/2fa').type('form').send({ _csrf, code: mfaTotp(user.mfaTestSecret).generate() });
+    if (verified.status !== 302) throw new Error(`MFA login failed: ${verified.status}`);
+  }
+  return csrf(agent,response.headers.location === '/panel/bezpieczenstwo' ? '/panel/bezpieczenstwo' : '/panel');
+}
+export function enableMfa(db, user, config = { mfaEncryptionKey: testMfaKey }) {
+  user.mfaTestSecret = createMfaSecret();
+  db.prepare('UPDATE users SET mfa_secret=?,mfa_last_step=NULL WHERE id=?').run(encryptMfaSecret(config, user.id, user.mfaTestSecret), user.id);
+  return user;
 }
 export function addDonation(db,c,options={}) {
   const d={id:token(),campaign_id:c.id,code:`BR-${token(6).toUpperCase()}`,amount:5000,...options};

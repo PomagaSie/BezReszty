@@ -7,9 +7,9 @@ const config=JSON.parse(readFileSync(resolve(root,process.argv[2] || 'deploy/pro
 for(const key of ['host','user','domain','zone','notificationDomain','worker'])if(!/^[A-Za-z0-9._-]+$/.test(config[key]))throw new Error('Nieprawidłowa konfiguracja: '+key);
 for(const key of ['root','envFile'])if(!/^\/[A-Za-z0-9_./-]+$/.test(config[key]))throw new Error('Nieprawidłowa ścieżka: '+key);
 if(!/^[0-9a-f:]+$/i.test(config.cytrus?.ipv6||'')||!Number.isInteger(config.cytrus?.port)||config.cytrus.port<1024||config.cytrus.port>65535)throw new Error('Nieprawidłowa konfiguracja: cytrus');
-// Cytrus' public IPv4 (the same value cargo.mleczki.pl uses for its proxied A record); CYTRUS_IPV4 overrides the configured one.
-const cytrusIpv4=process.env.CYTRUS_IPV4 || config.cytrus.ipv4 || '';
-if(!/^(\d{1,3}\.){3}\d{1,3}$/.test(cytrusIpv4))throw new Error('Ustaw cytrus.ipv4 w deploy/production.json (lub CYTRUS_IPV4) — adres IPv4 Cytrusa dla rekordu A.');
+// Cytrus' public IPv4 (the same value cargo.mleczki.pl uses for its proxied A record), supplied as the CYTRUS_IPV4 secret.
+const cytrusIpv4=process.env.CYTRUS_IPV4 || '';
+if(!/^(\d{1,3}\.){3}\d{1,3}$/.test(cytrusIpv4))throw new Error('Ustaw CYTRUS_IPV4 — adres IPv4 Cytrusa dla rekordu A.');
 const workerDir=resolve(root,'email-worker');
 const cfBin=resolve(workerDir,'node_modules/.bin/cf');
 const run=(cmd,args,options={})=>execFileSync(cmd,args,{cwd:root,encoding:'utf8',stdio:options.capture?'pipe':'inherit',...options});

@@ -10,7 +10,6 @@
   "notificationPrefix": "wplaty+",
   "worker": "bezreszty-bank-mail",
   "cytrus": {
-    "ipv4": "135.181.95.85",
     "ipv6": "2a01:4f9:3100:4648::192",
     "port": 8088
   },

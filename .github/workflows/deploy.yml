@@ -60,7 +60,6 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          CYTRUS_IPV4: ${{ secrets.CYTRUS_IPV4 }}
         run: |
           set -o pipefail
           if ! node scripts/deploy.mjs 2>&1 | tee "$RUNNER_TEMP/deploy.log"; then

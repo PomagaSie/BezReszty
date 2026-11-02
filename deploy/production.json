@@ -15,8 +15,7 @@
   },
   "migrateFromTunnelId": "5a663ac6-adf3-43ac-ba22-f992d17c7c0c",
   "enableSubaddressing": true,
-  "legacyDomains": [
-    "bezreszty.mleczki.pl",
+  "redirectFrom": [
     "www.bezreszty.org.pl"
   ]
 }

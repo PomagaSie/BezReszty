@@ -162,7 +162,8 @@ Konfiguracja docelowa znajduje się w `deploy/production.json`. `node scripts/de
 
 1. Uruchamia testy, wysyła wyłącznie archiwum aktualnego commita.
 2. Buduje i uruchamia jeden kontener na Wandzie, zachowując wolumen SQLite.
-3. Ustawia dla hostname aplikacji (i aliasów w strefie) proxied rekord A na IPv4 Cytrusa (sekret `CYTRUS_IPV4`). Zastępuje wyłącznie CNAME dawnego tunelu (`migrateFromTunnelId`), innych rekordów nie rusza. Domena musi być wcześniej dodana w panelu Cytrusa na port z `deploy/production.json`; skrypt sprawdza to na początku przez API Mikrusa (`CYTRUS_API_TOKEN`) i przerywa, zanim cokolwiek zmieni.
+3. Ustawia dla hostname aplikacji i hostów z `redirectFrom` proxied rekord A na IPv4 Cytrusa (sekret `CYTRUS_IPV4`). Zastępuje wyłącznie CNAME dawnego tunelu (`migrateFromTunnelId`), innych rekordów nie rusza. Domena aplikacji musi być wcześniej dodana w panelu Cytrusa na port z `deploy/production.json`; skrypt sprawdza to na początku przez API Mikrusa (`CYTRUS_API_TOKEN`) i przerywa, zanim cokolwiek zmieni.
+   Hosty z `redirectFrom` (np. `www`) nie są dodawane w Cytrusie: skrypt dodaje w strefie regułę Redirect Rule (301, ze ścieżką i zapytaniem) na domenę główną. Istniejące reguły strefy zostają nietknięte, a istniejącej reguły o tym samym opisie skrypt nie zmienia. Jeśli token nie ma uprawnień do reguł, deploy kończy się ostrzeżeniem z treścią reguły do dodania ręcznie. Alias z innej strefy (`bezreszty.mleczki.pl`) konfigurujesz ręcznie, a aplikacja przekierowuje hosty z `LEGACY_DOMAINS` dodatkowo na poziomie aplikacji.
 4. Włącza routing tylko dla subdomeny BezReszty, zachowując MX domeny głównej.
 5. Buduje i wdraża **odrębnego** Workera `bezreszty-bank-mail`, podaje mu osobny sekret HMAC i tworzy regułę `wplaty@bezreszty.org.pl` (z subadresowaniem).
 6. Synchronizuje publiczne SPF/DKIM/DMARC z `deploy/mail-dns.json`, jeśli plik istnieje, i sprawdza publiczne `/healthz`.

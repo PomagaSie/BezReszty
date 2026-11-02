@@ -19,7 +19,6 @@ if(!cytrusToken)throw new Error('Ustaw CYTRUS_API_TOKEN — klucz API Mikrusa do
  if(!reply.ok)throw new Error(`API Cytrusa odpowiedziało statusem ${reply.status}.`);
  const registered=(await reply.json()).map(entry=>entry.name);
  if(!registered.includes(config.domain))throw new Error(`Domena ${config.domain} nie jest dodana w Cytrusie (port ${config.cytrus.port}). Dodane domeny: ${registered.join(', ') || 'brak'}.`);
- for(const hostname of config.legacyDomains || [])if(!registered.includes(hostname))console.log(`Uwaga: alias ${hostname} nie jest dodany w Cytrusie — nie będzie obsługiwany.`);
 }
 const workerDir=resolve(root,'email-worker');
 const cfBin=resolve(workerDir,'node_modules/.bin/cf');
@@ -67,9 +66,31 @@ try {
   else throw new Error(`${hostname} ma inny rekord DNS — nie nadpisano go.`);
  };
  ensureCytrusRecord(config.domain);
- for(const hostname of config.legacyDomains || []){
-  if(hostname.endsWith('.'+config.zone))ensureCytrusRecord(hostname);
-  else console.log(`Uwaga: ${hostname} jest poza strefą ${config.zone} — dodaj ją w Cytrusie (port ${config.cytrus.port}) i ustaw rekord A na ${cytrusIpv4} ręcznie.`);
+ // Hosts redirected to the main domain at the Cloudflare edge (e.g. www). They need only a proxied record: the redirect answers
+ // before a request reaches Cytrus, so they are not registered there. Hosts in other zones (bezreszty.mleczki.pl) are done by hand.
+ const redirectFrom=config.redirectFrom || [];
+ for(const hostname of redirectFrom){
+  if(!hostname.endsWith('.'+config.zone))throw new Error(`Przekierowanie ${hostname} musi leżeć w strefie ${config.zone}.`);
+  ensureCytrusRecord(hostname);
+ }
+ if(redirectFrom.length){
+  const phase='http_request_dynamic_redirect';
+  const description='BezReszty — przekierowanie aliasów na domenę główną';
+  const rule={action:'redirect',description,enabled:true,
+   expression:`http.host in {${redirectFrom.map(host=>`"${host}"`).join(' ')}}`,
+   action_parameters:{from_value:{status_code:301,preserve_query_string:true,target_url:{expression:`concat("https://${config.domain}", http.request.uri.path)`}}}};
+  try{
+   let entry=null;
+   try{entry=json(['rulesets','account-rulesets','phases','get',phase,'-z',config.zone]);}catch{/* no redirect rules in this zone yet */}
+   const existing=(entry?.rules||[]).find(item=>item.description===description);
+   if(!entry)cf(['rulesets','account-rulesets','create','-z',config.zone,'--body',JSON.stringify({name:'default',kind:'zone',phase,rules:[rule]})]);
+   else if(!existing)cf(['rulesets','account-rulesets','rules','create',entry.id,'-z',config.zone,'--body',JSON.stringify(rule)]);
+   // An existing rule with our description is left alone, so manual changes are never overwritten.
+   else if(existing.expression!==rule.expression)console.log(`Uwaga: reguła „${description}” ma inne wyrażenie niż w konfiguracji — nie zmieniono jej.`);
+  }catch(error){
+   // Without the right token permissions the app is already deployed; report instead of failing after the DNS change.
+   console.log(`::warning title=Przekierowania Cloudflare::Nie udało się dodać reguły (${String(error.message).split('\n')[0]}). Dodaj ręcznie Redirect Rule: ${rule.expression} -> https://${config.domain} z zachowaniem ścieżki, 301.`);
+  }
  }
  const routing=json(['email-routing','settings','get','-z',config.zone]);
  const configuredDomain=config.notificationDomain===config.zone ? routing.enabled : routing.subdomains?.some(domain=>domain.name===config.notificationDomain && domain.enabled);

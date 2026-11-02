@@ -10,6 +10,17 @@ if(!/^[0-9a-f:]+$/i.test(config.cytrus?.ipv6||'')||!Number.isInteger(config.cytr
 // Cytrus' public IPv4 (the same value cargo.mleczki.pl uses for its proxied A record), supplied as the CYTRUS_IPV4 secret.
 const cytrusIpv4=process.env.CYTRUS_IPV4 || '';
 if(!/^(\d{1,3}\.){3}\d{1,3}$/.test(cytrusIpv4))throw new Error('Ustaw CYTRUS_IPV4 — adres IPv4 Cytrusa dla rekordu A.');
+// Same check as the other Cytrus apps (cargo.mleczki.pl): the domain must already be registered in Cytrus for this server.
+// Done before anything is changed, so a missing registration never leaves DNS pointing at an unserved domain.
+const cytrusToken=process.env.CYTRUS_API_TOKEN || '';
+if(!cytrusToken)throw new Error('Ustaw CYTRUS_API_TOKEN — klucz API Mikrusa do sprawdzenia domeny w Cytrusie.');
+{
+ const reply=await fetch('https://api.mikr.us/domain',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({srv:config.host.split('.')[0],key:cytrusToken}),signal:AbortSignal.timeout(20000)});
+ if(!reply.ok)throw new Error(`API Cytrusa odpowiedziało statusem ${reply.status}.`);
+ const registered=(await reply.json()).map(entry=>entry.name);
+ if(!registered.includes(config.domain))throw new Error(`Domena ${config.domain} nie jest dodana w Cytrusie (port ${config.cytrus.port}). Dodane domeny: ${registered.join(', ') || 'brak'}.`);
+ for(const hostname of config.legacyDomains || [])if(!registered.includes(hostname))console.log(`Uwaga: alias ${hostname} nie jest dodany w Cytrusie — nie będzie obsługiwany.`);
+}
 const workerDir=resolve(root,'email-worker');
 const cfBin=resolve(workerDir,'node_modules/.bin/cf');
 const run=(cmd,args,options={})=>execFileSync(cmd,args,{cwd:root,encoding:'utf8',stdio:options.capture?'pipe':'inherit',...options});

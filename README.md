@@ -162,14 +162,14 @@ Konfiguracja docelowa znajduje się w `deploy/production.json`. `node scripts/de
 
 1. Uruchamia testy, wysyła wyłącznie archiwum aktualnego commita.
 2. Buduje i uruchamia jeden kontener na Wandzie, zachowując wolumen SQLite.
-3. Ustawia dla hostname aplikacji (i aliasów w strefie) proxied rekord A na IPv4 Cytrusa (sekret `CYTRUS_IPV4`). Zastępuje wyłącznie CNAME dawnego tunelu (`migrateFromTunnelId`), innych rekordów nie rusza. Domena musi być wcześniej dodana w panelu Cytrusa na port z `deploy/production.json`.
+3. Ustawia dla hostname aplikacji (i aliasów w strefie) proxied rekord A na IPv4 Cytrusa (sekret `CYTRUS_IPV4`). Zastępuje wyłącznie CNAME dawnego tunelu (`migrateFromTunnelId`), innych rekordów nie rusza. Domena musi być wcześniej dodana w panelu Cytrusa na port z `deploy/production.json`; skrypt sprawdza to na początku przez API Mikrusa (`CYTRUS_API_TOKEN`) i przerywa, zanim cokolwiek zmieni.
 4. Włącza routing tylko dla subdomeny BezReszty, zachowując MX domeny głównej.
 5. Buduje i wdraża **odrębnego** Workera `bezreszty-bank-mail`, podaje mu osobny sekret HMAC i tworzy regułę `wplaty@bezreszty.org.pl` (z subadresowaniem).
 6. Synchronizuje publiczne SPF/DKIM/DMARC z `deploy/mail-dns.json`, jeśli plik istnieje, i sprawdza publiczne `/healthz`.
 
 Sekrety pozostają w `/etc/bezreszty/runtime.env` (0600). Nie są w archiwum źródeł ani argumentach poleceń; plik sekretu Workera jest krótkotrwały i usuwany po wdrożeniu. Hasło SMTP nie jest resetowane w każdym deployu.
 
-`deploy.yml` wykonuje ten sam proces automatycznie po każdym pushu na `main`, gdy przejdą „Application checks” (testy, audyt, build obrazu), a także ręcznie (Run workflow). Wymaga dedykowanego `DEPLOY_SSH_KEY`, zweryfikowanego `DEPLOY_SSH_KNOWN_HOSTS`, `CLOUDFLARE_API_TOKEN`, `CYTRUS_IPV4` i zmiennej `CLOUDFLARE_ACCOUNT_ID`. Nie kopiuj osobistego klucza SSH do CI.
+`deploy.yml` wykonuje ten sam proces automatycznie po każdym pushu na `main`, gdy przejdą „Application checks” (testy, audyt, build obrazu), a także ręcznie (Run workflow). Wymaga dedykowanego `DEPLOY_SSH_KEY`, zweryfikowanego `DEPLOY_SSH_KNOWN_HOSTS`, `CLOUDFLARE_API_TOKEN`, `CYTRUS_IPV4`, `CYTRUS_API_TOKEN` i zmiennej `CLOUDFLARE_ACCOUNT_ID`. Nie kopiuj osobistego klucza SSH do CI.
 
 ### Outsider — własny adres nadawcy
 

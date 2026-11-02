@@ -79,7 +79,7 @@ docker compose ps
 docker compose logs --tail=50 app
 ```
 
-Jeśli nie masz istniejącego HTTPS/proxy, uruchom dodatkowo opcjonalny Caddy: `docker compose -f compose.yaml -f deploy/compose.https.yaml up -d`. Na Wandzie aplikacja korzysta z istniejącego tunelu, a jedynym nowym kontenerem jest sama aplikacja.
+Jeśli nie masz istniejącego HTTPS/proxy, uruchom dodatkowo opcjonalny Caddy: `docker compose -f compose.yaml -f deploy/compose.https.yaml up -d`. Na Wandzie aplikacja jest wystawiona przez Cytrus (jak `cargo.mleczki.pl`): kontener nasłuchuje na natywnym IPv6 serwera i porcie z `cytrus` w `deploy/production.json`, a jedynym nowym kontenerem jest sama aplikacja.
 
 Skonfiguruj osobnego Workera i aliasy bankowych powiadomień według [MAIL.md](docs/MAIL.md). Zarejestruj zwykłe konto na swojej stronie, potwierdź e-mail i nadaj mu rolę operatora:
 
@@ -162,14 +162,14 @@ Konfiguracja docelowa znajduje się w `deploy/production.json`. `node scripts/de
 
 1. Uruchamia testy, wysyła wyłącznie archiwum aktualnego commita.
 2. Buduje i uruchamia jeden kontener na Wandzie, zachowując wolumen SQLite.
-3. Dodaje wyłącznie hostname aplikacji do istniejącego tunelu i ustawia jej CNAME.
+3. Ustawia dla hostname aplikacji (i aliasów w strefie) proxied rekord A na IPv4 Cytrusa (`CYTRUS_IPV4`). Zastępuje wyłącznie CNAME dawnego tunelu (`migrateFromTunnelId`), innych rekordów nie rusza. Domena musi być wcześniej dodana w panelu Cytrusa na port z `deploy/production.json`.
 4. Włącza routing tylko dla subdomeny BezReszty, zachowując MX domeny głównej.
 5. Buduje i wdraża **odrębnego** Workera `bezreszty-bank-mail`, podaje mu osobny sekret HMAC i tworzy regułę `wplaty@bezreszty.org.pl` (z subadresowaniem).
 6. Synchronizuje publiczne SPF/DKIM/DMARC z `deploy/mail-dns.json`, jeśli plik istnieje, i sprawdza publiczne `/healthz`.
 
 Sekrety pozostają w `/etc/bezreszty/runtime.env` (0600). Nie są w archiwum źródeł ani argumentach poleceń; plik sekretu Workera jest krótkotrwały i usuwany po wdrożeniu. Hasło SMTP nie jest resetowane w każdym deployu.
 
-`deploy.yml` wykonuje ten sam proces automatycznie po każdym pushu na `main`, gdy przejdą „Application checks” (testy, audyt, build obrazu), a także ręcznie (Run workflow). Wymaga dedykowanego `DEPLOY_SSH_KEY`, zweryfikowanego `DEPLOY_SSH_KNOWN_HOSTS`, `CLOUDFLARE_API_TOKEN` i zmiennej `CLOUDFLARE_ACCOUNT_ID`. Nie kopiuj osobistego klucza SSH do CI.
+`deploy.yml` wykonuje ten sam proces automatycznie po każdym pushu na `main`, gdy przejdą „Application checks” (testy, audyt, build obrazu), a także ręcznie (Run workflow). Wymaga dedykowanego `DEPLOY_SSH_KEY`, zweryfikowanego `DEPLOY_SSH_KNOWN_HOSTS`, `CLOUDFLARE_API_TOKEN`, `CYTRUS_IPV4` i zmiennej `CLOUDFLARE_ACCOUNT_ID`. Nie kopiuj osobistego klucza SSH do CI.
 
 ### Outsider — własny adres nadawcy
 

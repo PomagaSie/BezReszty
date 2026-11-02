@@ -6,6 +6,10 @@ const root=resolve(import.meta.dirname,'..');
 const config=JSON.parse(readFileSync(resolve(root,process.argv[2] || 'deploy/production.json'),'utf8'));
 for(const key of ['host','user','domain','zone','notificationDomain','worker'])if(!/^[A-Za-z0-9._-]+$/.test(config[key]))throw new Error('Nieprawidłowa konfiguracja: '+key);
 for(const key of ['root','envFile'])if(!/^\/[A-Za-z0-9_./-]+$/.test(config[key]))throw new Error('Nieprawidłowa ścieżka: '+key);
+if(!/^[0-9a-f:]+$/i.test(config.cytrus?.ipv6||'')||!Number.isInteger(config.cytrus?.port)||config.cytrus.port<1024||config.cytrus.port>65535)throw new Error('Nieprawidłowa konfiguracja: cytrus');
+// Cytrus' public IPv4 (the same value cargo.mleczki.pl uses for its proxied A record).
+const cytrusIpv4=process.env.CYTRUS_IPV4 || '';
+if(!/^(\d{1,3}\.){3}\d{1,3}$/.test(cytrusIpv4))throw new Error('Ustaw CYTRUS_IPV4 — adres IPv4 Cytrusa dla rekordu A.');
 const workerDir=resolve(root,'email-worker');
 const cfBin=resolve(workerDir,'node_modules/.bin/cf');
 const run=(cmd,args,options={})=>execFileSync(cmd,args,{cwd:root,encoding:'utf8',stdio:options.capture?'pipe':'inherit',...options});
@@ -36,32 +40,26 @@ try {
   const finish=()=>{if(archiveCode!==undefined&&uploadCode!==undefined)(archiveCode===0&&uploadCode===0?resolvePromise:reject)(new Error('Nie udało się wysłać archiwum.'));};
   archive.on('error',reject);upload.on('error',reject);archive.on('exit',c=>{archiveCode=c;finish();});upload.on('exit',c=>{uploadCode=c;finish();});
  });
- const deployed=remote(`import os,subprocess,pathlib\nrelease=${q(release)}\nenv=os.environ.copy()\nenv.update({'BEZRESZTY_ENV_FILE':${q(config.envFile)},'BEZRESZTY_RELEASE':${q(sha)}})\nargs=['docker','compose','--project-name','bezreszty','--env-file',${q(config.envFile)},'-f',release+'/compose.yaml','-f',release+'/deploy/compose.wanda.yaml']\nsubprocess.run(args+['up','-d','--build','--wait','--wait-timeout','90'],env=env,check=True)\npathlib.Path(${q(config.root+'/current-release')}).write_text(${q(sha)}+'\\n')\nprint('Kontener aplikacji jest healthy.')\n`);
+ const deployed=remote(`import os,subprocess,pathlib\nrelease=${q(release)}\nenv=os.environ.copy()\nenv.update({'BEZRESZTY_ENV_FILE':${q(config.envFile)},'BEZRESZTY_RELEASE':${q(sha)},'CYTRUS_IPV6':${q(config.cytrus.ipv6)},'CYTRUS_PORT':${q(String(config.cytrus.port))}})\nargs=['docker','compose','--project-name','bezreszty','--env-file',${q(config.envFile)},'-f',release+'/compose.yaml','-f',release+'/deploy/compose.wanda.yaml']\nsubprocess.run(args+['up','-d','--build','--wait','--wait-timeout','90'],env=env,check=True)\npathlib.Path(${q(config.root+'/current-release')}).write_text(${q(sha)}+'\\n')\nprint('Kontener aplikacji jest healthy.')\n`);
  console.log(deployed.trim());
- // Add exactly this hostname, preserving the tunnel's other ingress settings and services.
- const tunnel=json(['tunnels','config','get',config.tunnelId]);
- const ingress=tunnel.config.ingress || [];
- const own=ingress.find(rule=>rule.hostname===config.domain);
- if(!own)ingress.splice(Math.max(0,ingress.length-1),0,{hostname:config.domain,service:config.tunnelOrigin});
- else if(own.service!==config.tunnelOrigin)throw new Error('Istniejąca reguła tunelu wskazuje inne origin. Sprawdź konfigurację.');
- if(!own)cf(['tunnels','config','update',config.tunnelId,'--body',JSON.stringify({config:{...tunnel.config,ingress}})]);
- const aliases=config.legacyDomains || [];
- if(aliases.some(hostname=>!ingress.some(rule=>rule.hostname===hostname))){
-  for(const hostname of aliases){
-   if(!/^[a-z0-9.-]+$/.test(hostname))throw new Error('Nieprawidłowa domena przekierowania.');
-   if(!ingress.some(rule=>rule.hostname===hostname))ingress.splice(Math.max(0,ingress.length-1),0,{hostname,service:config.tunnelOrigin});
-  }
-  cf(['tunnels','config','update',config.tunnelId,'--body',JSON.stringify({config:{...tunnel.config,ingress}})]);
- }
- for(const hostname of aliases.filter(host=>host.endsWith('.'+config.zone))){
+ // Cytrus proxies the domain to [IPv6]:port on the server; Cloudflare only needs a proxied A record to Cytrus' IPv4.
+ // The domain must already be added in the Cytrus panel for config.cytrus.port, otherwise the health check below fails.
+ const oldTunnelTarget=config.migrateFromTunnelId?`${config.migrateFromTunnelId}.cfargotunnel.com`:null;
+ const ensureCytrusRecord=hostname=>{
+  if(!/^[a-z0-9.-]+$/.test(hostname))throw new Error('Nieprawidłowa domena.');
   const existing=json(['dns','records','list','-z',config.zone,'--name',hostname]).filter(record=>['A','AAAA','CNAME'].includes(record.type));
-  if(!existing.length)cf(['dns','records','create','-z',config.zone,'--body',JSON.stringify({type:'CNAME',name:hostname,content:`${config.tunnelId}.cfargotunnel.com`,proxied:true,ttl:1})]);
-  else if(existing.length!==1||existing[0].type!=='CNAME'||existing[0].content!==`${config.tunnelId}.cfargotunnel.com`)throw new Error('Alias ma inny rekord DNS — nie nadpisano go.');
+  const body=JSON.stringify({type:'A',name:hostname,content:cytrusIpv4,proxied:true,ttl:1,comment:'BezReszty — Cytrus'});
+  if(!existing.length)cf(['dns','records','create','-z',config.zone,'--body',body]);
+  else if(existing.length===1&&existing[0].type==='A'&&existing[0].content===cytrusIpv4)return;
+  // Only the previous tunnel's CNAME is replaced; any other record is left untouched.
+  else if(existing.length===1&&existing[0].type==='CNAME'&&oldTunnelTarget&&existing[0].content===oldTunnelTarget)cf(['dns','records','update',existing[0].id,'-z',config.zone,'--body',body]);
+  else throw new Error(`${hostname} ma inny rekord DNS — nie nadpisano go.`);
+ };
+ ensureCytrusRecord(config.domain);
+ for(const hostname of config.legacyDomains || []){
+  if(hostname.endsWith('.'+config.zone))ensureCytrusRecord(hostname);
+  else console.log(`Uwaga: ${hostname} jest poza strefą ${config.zone} — dodaj ją w Cytrusie (port ${config.cytrus.port}) i ustaw rekord A na ${cytrusIpv4} ręcznie.`);
  }
- const records=json(['dns','records','list','-z',config.zone,'--name',config.domain]).filter(record=>['A','AAAA','CNAME'].includes(record.type));
- const target=`${config.tunnelId}.cfargotunnel.com`;
- if(!records.length)cf(['dns','records','create','-z',config.zone,'--body',JSON.stringify({type:'CNAME',name:config.domain,content:target,proxied:true,ttl:1,comment:'BezReszty — wdrożenie aplikacji'})]);
- else if(records.length!==1||records[0].type!=='CNAME'||records[0].content!==target)throw new Error('Domena ma inny rekord — nie nadpisano go.');
  const routing=json(['email-routing','settings','get','-z',config.zone]);
  const configuredDomain=config.notificationDomain===config.zone ? routing.enabled : routing.subdomains?.some(domain=>domain.name===config.notificationDomain && domain.enabled);
  if(!configuredDomain)cf(['email-routing','enable','-z',config.zone,...(config.notificationDomain===config.zone ? [] : ['--name',config.notificationDomain])]);

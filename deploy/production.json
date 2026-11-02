@@ -9,8 +9,11 @@
   "notificationDomain": "bezreszty.org.pl",
   "notificationPrefix": "wplaty+",
   "worker": "bezreszty-bank-mail",
-  "tunnelId": "5a663ac6-adf3-43ac-ba22-f992d17c7c0c",
-  "tunnelOrigin": "http://172.17.0.1:18089",
+  "cytrus": {
+    "ipv6": "2a01:4f9:3100:4648::192",
+    "port": 8088
+  },
+  "migrateFromTunnelId": "5a663ac6-adf3-43ac-ba22-f992d17c7c0c",
   "enableSubaddressing": true,
   "legacyDomains": [
     "bezreszty.mleczki.pl",

@@ -1,6 +1,8 @@
-# Istniejący tunel mail-relay łączy się przez bramę Docker bridge.
-# Uruchom z: docker compose -f compose.yaml -f deploy/compose.wanda.yaml up -d --build
+# Cytrus (Mikrus) łączy się po natywnym IPv6 serwera, tak jak przy cargo.mleczki.pl:
+# Cloudflare (A, proxied) -> Cytrus -> [IPv6 serwera]:PORT -> kontener.
+# Adres i port pochodzą z "cytrus" w deploy/production.json; domena musi być dodana w Cytrusie na ten port.
+# Uruchom z: CYTRUS_IPV6=... CYTRUS_PORT=... docker compose -f compose.yaml -f deploy/compose.wanda.yaml up -d --build
 services:
   app:
     ports:
-      - '172.17.0.1:18089:3000'
+      - '[${CYTRUS_IPV6:?Ustaw CYTRUS_IPV6}]:${CYTRUS_PORT:?Ustaw CYTRUS_PORT}:3000'

@@ -2,6 +2,7 @@ import { execFileSync,spawn } from 'node:child_process';
 import { existsSync,readFileSync,writeFileSync,mkdtempSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve,join } from 'node:path';
+import { ensureRedirectRule,redirectRule,REDIRECT_DESCRIPTION } from './lib/redirect-rule.mjs';
 const root=resolve(import.meta.dirname,'..');
 const config=JSON.parse(readFileSync(resolve(root,process.argv[2] || 'deploy/production.json'),'utf8'));
 for(const key of ['host','user','domain','zone','notificationDomain','worker'])if(!/^[A-Za-z0-9._-]+$/.test(config[key]))throw new Error('Nieprawidłowa konfiguracja: '+key);
@@ -74,22 +75,12 @@ try {
   ensureCytrusRecord(hostname);
  }
  if(redirectFrom.length){
-  const phase='http_request_dynamic_redirect';
-  const description='BezReszty — przekierowanie aliasów na domenę główną';
-  const rule={action:'redirect',description,enabled:true,
-   expression:`http.host in {${redirectFrom.map(host=>`"${host}"`).join(' ')}}`,
-   action_parameters:{from_value:{status_code:301,preserve_query_string:true,target_url:{expression:`concat("https://${config.domain}", http.request.uri.path)`}}}};
   try{
-   let entry=null;
-   try{entry=json(['rulesets','account-rulesets','phases','get',phase,'-z',config.zone]);}catch{/* no redirect rules in this zone yet */}
-   const existing=(entry?.rules||[]).find(item=>item.description===description);
-   if(!entry)cf(['rulesets','account-rulesets','create','-z',config.zone,'--body',JSON.stringify({name:'default',kind:'zone',phase,rules:[rule]})]);
-   else if(!existing)cf(['rulesets','account-rulesets','rules','create',entry.id,'-z',config.zone,'--body',JSON.stringify(rule)]);
-   // An existing rule with our description is left alone, so manual changes are never overwritten.
-   else if(existing.expression!==rule.expression)console.log(`Uwaga: reguła „${description}” ma inne wyrażenie niż w konfiguracji — nie zmieniono jej.`);
+   const outcome=ensureRedirectRule({cf,json,zone:config.zone,hosts:redirectFrom,domain:config.domain});
+   if(outcome==='differs')console.log(`Uwaga: reguła „${REDIRECT_DESCRIPTION}” ma inne wyrażenie niż w konfiguracji — nie zmieniono jej.`);
   }catch(error){
    // Without the right token permissions the app is already deployed; report instead of failing after the DNS change.
-   console.log(`::warning title=Przekierowania Cloudflare::Nie udało się dodać reguły (${String(error.message).split('\n')[0]}). Dodaj ręcznie Redirect Rule: ${rule.expression} -> https://${config.domain} z zachowaniem ścieżki, 301.`);
+   console.log(`::warning title=Przekierowania Cloudflare::Nie udało się dodać reguły (${String(error.message).split('\n')[0]}). Dodaj ręcznie Redirect Rule: ${redirectRule(redirectFrom,config.domain).expression} -> https://${config.domain} z zachowaniem ścieżki, 301.`);
   }
  }
  const routing=json(['email-routing','settings','get','-z',config.zone]);

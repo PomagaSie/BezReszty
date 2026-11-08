@@ -90,10 +90,10 @@ export const bankSchema = z.object({
 });
 export const campaignSchema = z.object({
   title: z.string().trim().min(10, 'Tytuł musi mieć co najmniej 10 znaków.').max(100),
-  summary: z.string().trim().min(30, 'Krótki opis musi mieć co najmniej 30 znaków.').max(240),
-  story: z.string().trim().min(100, 'Opisz cel zbiórki w co najmniej 100 znakach.').max(15000),
+  summary: z.string().transform(v => v.replace(/\r\n?/g, '\n').trim()).pipe(z.string().min(30, 'Krótki opis musi mieć co najmniej 30 znaków.').max(240, 'Krótki opis może mieć najwyżej 240 znaków.')),
+  story: z.string().trim().min(1, 'Opisz cel zbiórki w co najmniej 100 znakach.').max(120000, 'Opis jest zbyt długi.'), // length rules apply to the sanitised text, see src/story.js
   goal: z.string().transform((v, ctx) => { try { return toCents(v); } catch { ctx.addIssue({ code: 'custom', message: 'Niepoprawny cel.' }); return z.NEVER; } }).refine(v => v >= 10000 && v <= 100000000, 'Cel musi wynosić od 100 do 1 000 000 zł.'),
   category: z.enum(Object.keys(categories)), location: z.string().trim().min(2).max(80),
-  cover: z.enum(covers),
+  cover: z.enum([...covers, 'custom']),
   deadline: z.string().refine(v => !v || (/^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v + 'T23:59:59Z') > new Date()), 'Wybierz datę w przyszłości.').default(''),
 });

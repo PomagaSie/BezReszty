@@ -15,6 +15,7 @@ Jeśli BezReszty pomaga Ci pomagać, możesz dobrowolnie [postawić autorowi kaw
 - Konto organizatora: rejestracja, hasła scrypt, sesje, weryfikacja e-maila, reset hasła.
 - Weryfikacja rachunku: suma kontrolna NRB i bank 2490, indywidualny alias, test poczty i ręczna decyzja operatora.
 - Edycja szkiców, zgłoszenie i moderacja przed publikacją; zakończenie zbiórki.
+- Opis zbiórki w edytorze richtext (nagłówki, pogrubienie, listy, cytaty, linki, zdjęcia) oraz własne zdjęcie lub ilustracja jako okładka; krótki opis ma graficzny licznik znaków.
 - Wpłaty: dokładne kwoty w groszach, losowa referencja, instrukcja BLIK lub przelewu i odświeżany status.
 - IMAP z TLS: weryfikacja podpisu DKIM banku, zgodności rachunku i kwoty, ochrona przed ponownym zaksięgowaniem, kwarantanna wyjątków.
 - Panel operatora, dziennik operacji, responsywny interfejs, SVG branding, strona organizacji i instrukcja instalacji.
@@ -128,6 +129,12 @@ Odtwarzaj przy zatrzymanej aplikacji: zastąp `bezreszty.sqlite` sprawdzoną kop
 - `brand/` — logo, znak, grafika społecznościowa i zasady marki.
 - [Zestaw PNG](brand/PNG.md) — 57 ikon, logotypów i grafik BezReszty oraz PomagaSie; [pobierz ZIP](https://pomagasie.github.io/assets/brand-kit.zip). Ponowny eksport: `npm run brand:export` (Node.js 24 i `zip`).
 - [PUBLISHING.md](docs/PUBLISHING.md) — publikacja strony organizacji na GitHub Pages.
+
+## Edytor opisu i obrazy
+
+- Opis zbiórki jest zapisywany jako HTML i **zawsze** przebudowywany po stronie serwera z allow-listy (`src/story.js`): dozwolone są tylko nagłówki H2/H3, akapity, pogrubienie, kursywa, podkreślenie, listy, cytaty, linia pozioma, linki http(s)/mailto i obrazy wgrane przez autora. Starsze zbiórki (czysty tekst) są wyświetlane jako akapity.
+- Wgrane pliki (JPEG, PNG, WebP, GIF, AVIF do 10 MB; bez SVG) są dekodowane i zapisywane od nowa jako WebP (maks. 1600 px + miniatura 640 px): obrót według EXIF zostaje zastosowany, a wszystkie metadane, w tym lokalizacja GPS, są usuwane (`src/media.js`). Obrazy leżą w tabeli `media` w SQLite, więc kopia bazy (`npm run backup`) zawiera także je. Nieużywane obrazy starsze niż 2 dni są usuwane przy kolejnym wgraniu.
+- Przeglądarkowy edytor (TipTap) jest zbudowany do `public/vendor/story-editor.js` i zacommitowany, więc obraz produkcyjny nie potrzebuje kroku budowania. Po zmianie plików w `client/` uruchom `npm run build:editor` (licencje paczek trafiają do `public/vendor/story-editor.LICENSE.txt`).
 
 ## Testy
 

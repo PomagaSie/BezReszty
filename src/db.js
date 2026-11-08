@@ -74,6 +74,12 @@ export function openDatabase(path) {
       PRIMARY KEY(user_id,hash)
     );
     CREATE INDEX IF NOT EXISTS mfa_enrollment_expiry ON mfa_enrollments(expires_at);
+    CREATE TABLE IF NOT EXISTS media (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mime TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
+      data BLOB NOT NULL, thumb BLOB NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS media_owner ON media(owner_id, created_at);
   `);
   transaction(db, () => {
     const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(column => column.name));
@@ -86,6 +92,10 @@ export function openDatabase(path) {
     if (!userColumns.has('mobywatel_manual_code')) db.exec('ALTER TABLE users ADD COLUMN mobywatel_manual_code TEXT');
     if (!userColumns.has('mfa_secret')) db.exec('ALTER TABLE users ADD COLUMN mfa_secret TEXT');
     if (!userColumns.has('mfa_last_step')) db.exec('ALTER TABLE users ADD COLUMN mfa_last_step INTEGER');
+    const campaignColumns = new Set(db.prepare('PRAGMA table_info(campaigns)').all().map(column => column.name));
+    // 'text' = legacy plain-text story (blank-line separated paragraphs); 'html' = sanitised rich text produced by src/story.js.
+    if (!campaignColumns.has('story_format')) db.exec("ALTER TABLE campaigns ADD COLUMN story_format TEXT NOT NULL DEFAULT 'text'");
+    if (!campaignColumns.has('cover_media_id')) db.exec('ALTER TABLE campaigns ADD COLUMN cover_media_id TEXT');
     const sessionColumns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map(column => column.name));
     if (!sessionColumns.has('mfa_verified')) db.exec('ALTER TABLE sessions ADD COLUMN mfa_verified INTEGER NOT NULL DEFAULT 0');
     const hasTotals = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='campaign_totals'").get();

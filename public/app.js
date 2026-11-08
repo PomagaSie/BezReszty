@@ -180,3 +180,37 @@ for (const form of document.querySelectorAll('[data-qr-form]')) {
   });
   file.addEventListener('change', () => { if (file.files[0]) handle(file.files[0]); });
 }
+
+// Character limit that never blocks typing: the counter and a bar show the budget, characters over the limit are marked
+// red inside the field, and the form cannot be submitted until the text is short enough.
+for (const wrapper of document.querySelectorAll('[data-char-limit]')) {
+  const limit = Number(wrapper.dataset.charLimit), field = wrapper.querySelector('textarea, input'), backdrop = wrapper.querySelector('.limit-backdrop');
+  const meter = wrapper.nextElementSibling, bar = meter?.querySelector('progress'), count = meter?.querySelector('.limit-count');
+  if (!limit || !field || !backdrop || !meter) continue;
+  wrapper.classList.add('is-enhanced');
+  const copy = () => {
+    const style = getComputedStyle(field);
+    for (const name of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRadius', 'wordSpacing', 'textIndent']) backdrop.style[name] = style[name];
+    backdrop.style.scrollbarGutter = style.scrollbarGutter;
+  };
+  const render = () => {
+    const value = field.value, over = Math.max(0, value.trim().length - limit);
+    // Trailing whitespace is trimmed on save, so the marked part starts at the first character beyond the limit of the trimmed text.
+    const lead = value.length - value.trimStart().length, cut = over ? lead + limit : value.length;
+    backdrop.replaceChildren(document.createTextNode(value.slice(0, cut)));
+    if (over) { const mark = document.createElement('mark'); mark.textContent = value.slice(cut); backdrop.append(mark); }
+    backdrop.append(document.createTextNode('\n'));
+    backdrop.scrollTop = field.scrollTop;
+    const used = value.trim().length;
+    wrapper.classList.toggle('is-over', over > 0); meter.classList.toggle('is-over', over > 0); meter.classList.toggle('is-near', !over && used >= limit * .9);
+    field.setAttribute('aria-invalid', over ? 'true' : 'false');
+    field.setCustomValidity(over ? `Skróć tekst o ${over} ${over === 1 ? 'znak' : [2, 3, 4].includes(over % 10) && ![12, 13, 14].includes(over % 100) ? 'znaki' : 'znaków'}, aby zapisać formularz.` : '');
+    if (bar) bar.value = Math.min(used, limit);
+    if (count) count.textContent = over ? `${used} / ${limit} — o ${over} za dużo` : `${used} / ${limit}`;
+  };
+  field.addEventListener('input', render);
+  field.addEventListener('scroll', () => { backdrop.scrollTop = field.scrollTop; });
+  new ResizeObserver(() => { copy(); backdrop.scrollTop = field.scrollTop; }).observe(field);
+  copy(); render();
+  document.fonts?.ready.then(() => { copy(); render(); });
+}

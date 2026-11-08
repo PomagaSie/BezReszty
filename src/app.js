@@ -13,6 +13,8 @@ import { SqliteRateLimitStore } from './rate-limits.js';
 import { createMfaSecret, mfaTotp, encryptMfaSecret, decryptMfaSecret, mfaStep, consumeMfaCode, createRecoveryCodes } from './mfa.js';
 import { createMailer } from './email.js';
 import { campaignMedia } from './campaign-media.js';
+import { MEDIA_ID, MAX_UPLOAD_BYTES, UPLOAD_TYPES, MediaError, processImage, storeMedia, pruneMedia } from './media.js';
+import { sanitizeStory, textToHtml, STORY_MIN_TEXT, STORY_MAX_TEXT } from './story.js';
 import { authenticateBankMail, ingestAuthenticatedMail } from './bank.js';
 import { recordRejectedBankMail, preserveQuarantinedBankMail } from './bank-quarantine.js';
 
@@ -31,6 +33,8 @@ const assetVersion = (() => {
   return digest.digest('hex').slice(0, 10);
 })();
 const asset = path => `${path}?v=${assetVersion}`;
+// Stories are stored as sanitised HTML; campaigns created before rich text keep their plain text and are shown as paragraphs.
+const storyHtml = campaign => campaign.story_format === 'html' ? campaign.story : textToHtml(campaign.story);
 export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   const app = express();
   app.disable('x-powered-by');
@@ -60,7 +64,8 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     } else if (ingestAuthenticatedMail(db, config, event) === 'quarantined') preserveQuarantinedBankMail(db, config, req.body);
     res.sendStatus(204);
   });
-  app.use(express.urlencoded({ extended: false, limit: '40kb' }));
+  const smallForm = express.urlencoded({ extended: false, limit: '40kb' }), storyForm = express.urlencoded({ extended: false, limit: '256kb' });
+  app.use((req, res, next) => (req.method === 'POST' && /^\/panel\/(?:nowa-zbiorka|zbiorki\/[^/]+\/edytuj)$/.test(req.path) ? storyForm : smallForm)(req, res, next));
   app.use(express.json({ limit: '10kb' }));
   app.use(cookieParser());
   const cookieOptions = { httpOnly: true, secure: config.production, sameSite: 'lax', path: '/' };
@@ -79,7 +84,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     const existing = req.cookies[csrfCookie];
     req.csrf = req.user?.csrf || req.mfaChallenge?.csrf || (/^[a-f0-9]{64}$/.test(existing || '') ? existing : token());
     if (!req.user && req.csrf !== existing) res.cookie(csrfCookie, req.csrf, cookieOptions);
-    res.locals = { asset, campaignMedia, user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode, notificationAddress };
+    res.locals = { asset, campaignMedia, storyHtml, user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode, notificationAddress };
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       if (req.get('origin') && req.get('origin') !== config.baseUrl) return res.status(403).render('error', { title: 'Niedozwolone żądanie', message: 'Otwórz formularz ponownie na tej stronie.' });
       if (!safeEqual(req.body?._csrf || req.get('x-csrf-token'), req.csrf)) return res.status(403).render('error', { title: 'Formularz wygasł', message: 'Odśwież stronę i spróbuj ponownie.' });
@@ -338,12 +343,36 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     audit(db, req.user.id, 'bank_test_started', req.user.id);
     res.redirect('/panel/weryfikacja');
   });
+  // Pictures for covers and stories. The upload is the raw image body (no multipart parser, no filename to trust).
+  app.post('/panel/media', requireUser, limiter('media-upload', 40, 15 * 60000, req => req.user.id), express.raw({ type: UPLOAD_TYPES, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (config.demo) return res.status(403).json({ error: 'Demo nie zapisuje obrazów.' });
+    if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(415).json({ error: 'Wybierz plik JPEG, PNG, WebP, GIF lub AVIF.' });
+    try {
+      const media = storeMedia(db, req.user.id, await processImage(req.body));
+      pruneMedia(db, req.user.id);
+      res.status(201).json({ id: media.id, url: `/media/${media.id}`, thumb: `/media/${media.id}/thumb`, width: media.width, height: media.height });
+    } catch (error) {
+      if (error instanceof MediaError) return res.status(422).json({ error: error.message });
+      console.error('Image upload failed:', error.code || error.name); res.status(500).json({ error: 'Nie udało się zapisać obrazu. Spróbuj ponownie.' });
+    }
+  });
+  const serveMedia = variant => (req, res) => {
+    if (!MEDIA_ID.test(req.params.id)) return res.sendStatus(404);
+    const row = db.prepare(`SELECT mime, ${variant} bytes FROM media WHERE id=?`).get(req.params.id);
+    if (!row) return res.sendStatus(404);
+    // Identifiers are random and never reused, so the bytes behind a URL never change: cache them for good.
+    res.set({ 'Content-Type': row.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox", 'Cross-Origin-Resource-Policy': 'cross-origin' });
+    res.send(Buffer.from(row.bytes));
+  };
+  app.get('/media/:id', serveMedia('data'));
+  app.get('/media/:id/thumb', serveMedia('thumb'));
   app.get('/panel/nowa-zbiorka', requireUser, (req, res) => res.render('editor', { title: 'Zacznij coś dobrego', campaign: null }));
   app.post('/panel/nowa-zbiorka', requireUser, limiter('campaign-create-user', 20, 15 * 60000, req => req.user.id), (req, res) => saveCampaign(req, res));
   app.get('/panel/zbiorki/:id/edytuj', requireUser, (req, res) => {
     const campaign = db.prepare('SELECT * FROM campaigns WHERE id=? AND owner_id=?').get(req.params.id, req.user.id);
     if (!campaign) return res.status(404).render('error', { title: 'Nie ma takiej zbiórki', message: 'Sprawdź adres strony.' });
-    res.render('editor', { title: 'Edytuj zbiórkę', campaign, values: { ...campaign, goal: String(campaign.goal / 100) } });
+    res.render('editor', { title: 'Edytuj zbiórkę', campaign, values: { ...campaign, goal: String(campaign.goal / 100), story: storyHtml(campaign), cover: campaign.cover_media_id ? 'custom' : campaign.cover } });
   });
   app.post('/panel/zbiorki/:id/edytuj', requireUser, (req, res) => saveCampaign(req, res, req.params.id));
   function saveCampaign(req, res, id = null) {
@@ -352,17 +381,27 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     if (id && !campaign) return res.sendStatus(404);
     try {
       const data = campaignSchema.parse(req.body);
+      const owns = mediaId => MEDIA_ID.test(mediaId) && Boolean(db.prepare('SELECT 1 FROM media WHERE id=? AND owner_id=?').get(mediaId, req.user.id));
+      const story = sanitizeStory(data.story, { mediaAllowed: owns });
+      if (story.text.length < STORY_MIN_TEXT) throw new Error('Opisz cel zbiórki w co najmniej 100 znakach.');
+      if (story.text.length > STORY_MAX_TEXT) throw new Error('Opis zbiórki może mieć najwyżej 15 000 znaków.');
+      let cover = data.cover, coverMediaId = null;
+      if (cover === 'custom') {
+        coverMediaId = String(req.body.cover_media_id || '');
+        if (!owns(coverMediaId)) throw new Error('Wgraj własne zdjęcie lub ilustrację albo wybierz jedną z gotowych.');
+        cover = 'community'; // the preset stays as a fallback should the picture ever disappear
+      }
       if (req.body.action === 'submit' && req.user.verification_status !== 'verified') throw new Error('Przed zgłoszeniem zbiórki ukończ weryfikację organizatora. Szkic możesz zapisać już teraz.');
       const status = req.body.action === 'submit' ? 'pending' : 'draft';
       const campaignId = id || randomUUID();
       if (id) {
-        db.prepare('UPDATE campaigns SET title=?,summary=?,story=?,category=?,location=?,cover=?,goal=?,deadline=?,status=?,updated_at=? WHERE id=? AND owner_id=?').run(data.title, data.summary, data.story, data.category, data.location, data.cover, data.goal, data.deadline || null, status, now(), id, req.user.id);
+        db.prepare("UPDATE campaigns SET title=?,summary=?,story=?,story_format='html',category=?,location=?,cover=?,cover_media_id=?,goal=?,deadline=?,status=?,updated_at=? WHERE id=? AND owner_id=?").run(data.title, data.summary, story.html, data.category, data.location, cover, coverMediaId, data.goal, data.deadline || null, status, now(), id, req.user.id);
       } else {
-        db.prepare('INSERT INTO campaigns(id,owner_id,slug,title,summary,story,category,location,cover,goal,deadline,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(campaignId, req.user.id, `${slugify(data.title)}-${token(3)}`, data.title, data.summary, data.story, data.category, data.location, data.cover, data.goal, data.deadline || null, status, now(), now());
+        db.prepare("INSERT INTO campaigns(id,owner_id,slug,title,summary,story,story_format,category,location,cover,cover_media_id,goal,deadline,status,created_at,updated_at) VALUES (?,?,?,?,?,?,'html',?,?,?,?,?,?,?,?,?)").run(campaignId, req.user.id, `${slugify(data.title)}-${token(3)}`, data.title, data.summary, story.html, data.category, data.location, cover, coverMediaId, data.goal, data.deadline || null, status, now(), now());
       }
       audit(db, req.user.id, `campaign_${status}`, campaignId);
       res.redirect(`/panel?notice=${status === 'pending' ? 'submitted' : 'saved'}`);
-    } catch (error) { formError(res, 'editor', error, { campaign, values: req.body }); }
+    } catch (error) { formError(res, 'editor', error, { campaign, values: { ...req.body, story: sanitizeStory(req.body.story, { mediaAllowed: mediaId => MEDIA_ID.test(mediaId) && Boolean(db.prepare('SELECT 1 FROM media WHERE id=? AND owner_id=?').get(mediaId, req.user.id)) }).html } }); }
   }
   app.post('/panel/zbiorki/:id/zamknij', requireUser, (req, res) => {
     if (config.demo) return res.sendStatus(403);

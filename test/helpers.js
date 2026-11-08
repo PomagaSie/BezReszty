@@ -3,15 +3,17 @@ import { openDatabase, now } from '../src/db.js';
 import { token, passwordHash, newTransferCode } from '../src/domain.js';
 import { readConfig } from '../src/config.js';
 import { createApp } from '../src/app.js';
+import { createPush } from '../src/push.js';
 import { createMfaSecret, encryptMfaSecret, mfaTotp } from '../src/mfa.js';
 export const testMfaKey = 'test-only-mfa-encryption-key-32-characters';
 export const iban='96249000000000000000000001';
-export function setup(extra={}) {
+export function setup(extra={}, { fetchImpl } = {}) {
   const db=openDatabase(':memory:');
   const config={...readConfig({}),mfaEncryptionKey:testMfaKey,...extra};
   const messages=[];
-  const app=createApp({config,db,sendMail:async(user,purpose)=>{messages.push({user,purpose});}});
-  return {db,config,app,messages};
+  const push=createPush(config,db,fetchImpl?{fetchImpl}:{});
+  const app=createApp({config,db,push,sendMail:async(user,purpose)=>{messages.push({user,purpose});}});
+  return {db,config,app,messages,push};
 }
 export async function addUser(db,options={}) {
   const id=randomUUID(),email=`${token(6)}@example.test`;

@@ -222,3 +222,62 @@ for (const wrapper of document.querySelectorAll('[data-char-limit]')) {
   copy(); render();
   document.fonts?.ready.then(() => { copy(); render(); });
 }
+
+// Push notifications: one opt-in button per page, one browser subscription per device. The server decides who is
+// subscribed (status check), so a device used by someone else never looks "enabled" for the wrong account.
+const pushApi = (path, body, csrf) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body), cache: 'no-store', signal: AbortSignal.timeout(10000) });
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const pushBox = document.querySelector('[data-push]');
+if (pushBox) (async () => {
+  const toggle = pushBox.querySelector('[data-push-toggle]'), status = pushBox.querySelector('[data-push-status]'), csrf = pushBox.dataset.csrf;
+  pushBox.hidden = false;
+  if (!pushSupported) { status.textContent = 'Ta przeglądarka nie obsługuje powiadomień. Na iPhonie dodaj najpierw stronę do ekranu głównego (Udostępnij → Do ekranu początkowego).'; return; }
+  const bytes = text => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), char => char.charCodeAt(0));
+  const key = bytes(pushBox.dataset.key);
+  let registration, subscription = null, enabled = false;
+  const render = () => {
+    const denied = Notification.permission === 'denied';
+    toggle.disabled = denied; toggle.textContent = enabled ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
+    status.textContent = denied ? 'Powiadomienia są zablokowane w ustawieniach przeglądarki dla tej strony.' : enabled ? '✓ Włączone na tym urządzeniu.' : '';
+  };
+  const sameKey = current => { const a = new Uint8Array(current.options.applicationServerKey || []); return a.length === key.length && a.every((value, index) => value === key[index]); };
+  try {
+    registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    subscription = await registration.pushManager.getSubscription();
+    if (subscription) enabled = (await (await pushApi('/api/push/status', { endpoint: subscription.endpoint }, csrf)).json()).subscribed === true;
+  } catch { status.textContent = 'Nie udało się przygotować powiadomień. Odśwież stronę.'; return; }
+  render();
+  toggle.addEventListener('click', async () => {
+    toggle.disabled = true;
+    try {
+      if (enabled) {
+        await pushApi('/api/push/unsubscribe', { endpoint: subscription.endpoint }, csrf);
+        await subscription.unsubscribe(); subscription = null; enabled = false;
+      } else {
+        if (await Notification.requestPermission() !== 'granted') return;
+        if (subscription && !sameKey(subscription)) { await subscription.unsubscribe(); subscription = null; }
+        const created = !subscription;
+        subscription = subscription || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        const response = await pushApi('/api/push/subscribe', subscription.toJSON(), csrf);
+        if (!response.ok) { if (created) await subscription.unsubscribe(); subscription = null; throw new Error((await response.json().catch(() => ({}))).error || 'Request failed'); }
+        enabled = true;
+      }
+    } catch (error) { toast(enabled ? 'Nie udało się wyłączyć powiadomień. Spróbuj ponownie.' : error.message && error.message !== 'Request failed' ? error.message : 'Nie udało się włączyć powiadomień. Spróbuj ponownie.'); }
+    finally { render(); }
+  });
+})();
+
+// Logging out of a browser also turns off notifications there, so the next person on a shared device never receives them.
+if (pushSupported) for (const form of document.querySelectorAll('form[action="/wyloguj"]')) form.addEventListener('submit', async event => {
+  if (form.dataset.pushDone) return;
+  event.preventDefault();
+  try {
+    const subscription = await (await navigator.serviceWorker.getRegistration('/'))?.pushManager.getSubscription();
+    if (subscription) {
+      const response = await pushApi('/api/push/unsubscribe', { endpoint: subscription.endpoint }, form.querySelector('[name="_csrf"]').value);
+      if ((await response.json()).removed) await subscription.unsubscribe();
+    }
+  } catch { /* Logging out must never depend on the push service. */ }
+  form.dataset.pushDone = '1'; form.submit();
+});

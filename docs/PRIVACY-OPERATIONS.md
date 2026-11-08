@@ -25,6 +25,13 @@ Kwarantanna pełnych wiadomości ma osobny limit jednej godziny i porządkowanie
 
 Wariant produkcyjny opisany w `docs/MAIL.md` nie ma skrzynki IMAP dla wiadomości bankowych. Przy zmianie na IMAP ustaw retencję także u dostawcy i uaktualnij politykę. Wyłączenie serwera wstrzymuje proces usuwania; zaległości są usuwane przy następnym starcie.
 
+## Powiadomienia push
+
+- Klucz VAPID instancji powstaje przy pierwszym użyciu i jest zapisany w tabeli `app_secrets` zaszyfrowany kluczem wyprowadzonym z `MFA_ENCRYPTION_KEY` (osobny kontekst HKDF). Bez tego klucza powiadomienia są wyłączone. Po jego zmianie nowa para VAPID powstaje automatycznie, a stare subskrypcje są usuwane; urządzenia muszą ponownie włączyć powiadomienia.
+- `push_subscriptions` zawiera adres i klucze subskrypcji przeglądarki. Rekord znika po wyłączeniu przez użytkownika, wylogowaniu z przeglądarki, odpowiedzi 404/410 usługi powiadomień albo usunięciu konta. Adresy są przyjmowane wyłącznie z usług przeglądarek (lista w `src/push.js`).
+- `push_outbox` to kolejka wysyłki, czyszczona po dostarczeniu i najpóźniej po godzinie. Powiadomienie nie zawiera podpisu ani komentarza wpłacającego; nie dodawaj ich ani innych danych osobowych do treści.
+- Przy wniosku o usunięcie danych usuń także subskrypcje użytkownika (kasuje je usunięcie konta).
+
 ## Roszczenia, zamknięcie konta i prawa osób
 
 1. Obsługuj wnioski przez prywatny adres z `/kontakt`. Potwierdź tożsamość proporcjonalnie do żądania; nie wymagaj automatycznie kopii dokumentu.

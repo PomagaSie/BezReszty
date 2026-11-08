@@ -5,6 +5,7 @@ import { syncMailbox } from './bank.js';
 import { pruneBankQuarantine } from './bank-quarantine.js';
 import { importEditorialMedia } from './editorial-media.js';
 import { pruneTransientData, pruneManagedBackups } from './retention.js';
+import { createPush } from './push.js';
 const config = readConfig();
 const db = openDatabase(config.dbPath);
 pruneBankQuarantine(db);
@@ -15,7 +16,8 @@ try { if (await importEditorialMedia(db) === 'imported') console.log('Zrzuty ekr
 catch (error) { console.error('Import obrazów zbiórki nie powiódł się (spróbuje ponownie przy następnym starcie):', error.code || error.name || error.message); }
 const modes = db.prepare('SELECT DISTINCT is_demo FROM campaigns').all().map(row => row.is_demo);
 if (modes.some(mode => Boolean(mode) !== config.demo)) throw new Error('Baza zawiera dane z innego trybu. Użyj osobnej bazy dla demo i produkcji.');
-const server = createApp({ config, db }).listen(config.port, config.host, () => console.log(`BezReszty: ${config.baseUrl} (${config.demo ? 'demo — wpłaty wyłączone' : config.production ? 'production' : 'development'})`));
+const push = createPush(config, db);
+const server = createApp({ config, db, push }).listen(config.port, config.host, () => console.log(`BezReszty: ${config.baseUrl} (${config.demo ? 'demo — wpłaty wyłączone' : config.production ? 'production' : 'development'})`));
 let syncing = false;
 let nextRetention = Date.now() + 60000;
 const sync = async () => {
@@ -32,8 +34,11 @@ const sync = async () => {
 if (config.imap && !config.demo) void sync();
 const timer = setInterval(sync, 30000);
 timer.unref();
+// Notifications are queued by whatever process saw the event (also the mail-sync scripts); this process delivers them.
+const pushTimer = setInterval(() => push.flush().catch(error => console.error('Wysyłka powiadomień nie powiodła się:', error.code || error.name)), 5000);
+pushTimer.unref();
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
-  clearInterval(timer);
+  clearInterval(timer); clearInterval(pushTimer);
   server.close(() => { db.close(); process.exit(0); });
   setTimeout(() => process.exit(1), 10000).unref();
 });

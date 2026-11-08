@@ -12,6 +12,7 @@ export function pruneTransientData(db, current = Date.now()) {
   return transaction(db, () => {
     const messages = db.prepare("DELETE FROM bank_messages WHERE status NOT IN ('matched','verification') AND received_at<=?").run(cutoff).changes;
     const donations = db.prepare("DELETE FROM donations WHERE status='pending' AND created_at<=? AND NOT EXISTS (SELECT 1 FROM bank_messages b WHERE b.donation_id=donations.id)").run(cutoff).changes;
+    db.prepare('DELETE FROM push_outbox WHERE created_at<=?').run(current - 3600000);
     db.prepare('UPDATE users SET mobywatel_code=NULL,mobywatel_manual_code=NULL,mobywatel_code_expires_at=NULL WHERE mobywatel_code_expires_at<=?').run(current);
     return { messages, donations };
   });

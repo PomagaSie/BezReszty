@@ -1,0 +1,6 @@
+<% if (typeof pushKey !== 'undefined' && pushKey) { %><section class="push-card" data-push data-key="<%= pushKey %>" data-csrf="<%= csrf %>" hidden>
+<div><span class="eyebrow">POWIADOMIENIA</span><h2>Daj znać, gdy coś się wydarzy</h2>
+<p class="muted"><% if (user.role === 'admin') { %>Na tym urządzeniu dostaniesz powiadomienie, gdy pojawi się zbiórka do akceptacji<% } else { %>Na tym urządzeniu dostaniesz powiadomienie o każdej nowej wpłacie na Twoją zbiórkę<% } %>. Nie zawiera imienia ani komentarza wpłacającego. Wylogowanie wyłącza powiadomienia na tym urządzeniu.</p>
+<p class="fine-print" data-push-status role="status" aria-live="polite"></p></div>
+<button class="button secondary" type="button" data-push-toggle disabled>Włącz powiadomienia</button>
+</section><% } %>

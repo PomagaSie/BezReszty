@@ -82,6 +82,20 @@ export function openDatabase(path) {
       data BLOB NOT NULL, thumb BLOB NOT NULL, created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS media_owner ON media(owner_id, created_at);
+    CREATE TABLE IF NOT EXISTS app_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL,
+      created_at TEXT NOT NULL, last_success_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS push_subscription_user ON push_subscriptions(user_id, created_at);
+    CREATE TABLE IF NOT EXISTS push_outbox (
+      id INTEGER PRIMARY KEY, subscription_id TEXT NOT NULL REFERENCES push_subscriptions(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, url TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, next_attempt_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS push_outbox_due ON push_outbox(next_attempt_at);
+    CREATE INDEX IF NOT EXISTS push_outbox_subscription ON push_outbox(subscription_id);
   `);
   transaction(db, () => {
     const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(column => column.name));

@@ -4,10 +4,11 @@ import { hash, token } from './domain.js';
 
 export const createMfaSecret = () => new Secret({ size: 20 }).base32;
 export const mfaTotp = (secret, email = '') => new TOTP({ issuer: 'BezReszty', label: email, algorithm: 'SHA1', digits: 6, period: 30, secret });
-const encryptionKey = config => {
+// `info` separates the keys derived for different purposes from the same configured secret.
+export const encryptionKey = (config, info = 'totp-secret-v1') => {
   const value = config.mfaEncryptionKey || config.bankWebhookSecret;
   if (!value || value.length < 32) throw Object.assign(new Error('MFA encryption is not configured'), { code: 'MFA_NOT_CONFIGURED' });
-  return Buffer.from(hkdfSync('sha256', value, 'BezReszty MFA', 'totp-secret-v1', 32));
+  return Buffer.from(hkdfSync('sha256', value, 'BezReszty MFA', info, 32));
 };
 export function encryptMfaSecret(config, userId, secret) {
   const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', encryptionKey(config), iv);

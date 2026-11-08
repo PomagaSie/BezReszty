@@ -3,8 +3,9 @@ import { simpleParser } from 'mailparser';
 import { ImapFlow } from 'imapflow';
 import { randomUUID } from 'node:crypto';
 import { signedMultipartSource } from './shared/bank-mail-mime.js';
-import { verificationCode, accountMatches, toCents, hash, titleHasCode } from './domain.js';
+import { verificationCode, accountMatches, toCents, hash, titleHasCode, money } from './domain.js';
 import { now, transaction, audit } from './db.js';
+import { queuePush } from './push.js';
 
 const clean = text => text.replace(/<[^>]*>/g, '').replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').trim();
 const signedHeaderNames = signature => (Array.isArray(signature.signingHeaders?.keys) ? signature.signingHeaders.keys : String(signature.signingHeaders?.keys || '').split(':')).map(value => value.toLowerCase().trim());
@@ -66,7 +67,7 @@ export async function authenticateBankMail(raw, config, options = {}) {
 // Short codes are matched against this organizer's candidates only, never globally. The title may carry extra text and
 // stray spaces inside the code (see titleHasCode). A title that fits zero or several candidates is never guessed.
 function findDonation(db, ownerId, parsed) {
-  const select = "SELECT d.*,c.owner_id,c.is_demo FROM donations d JOIN campaigns c ON c.id=d.campaign_id WHERE c.owner_id=? AND d.status=?";
+  const select = "SELECT d.*,c.owner_id,c.is_demo,c.title campaign_title FROM donations d JOIN campaigns c ON c.id=d.campaign_id WHERE c.owner_id=? AND d.status=?";
   const unique = rows => { const hits = rows.filter(d => titleHasCode(parsed.title, d.code)); return hits.length === 1 ? hits[0] : hits.length ? 'ambiguous' : null; };
   const pending = db.prepare(select).all(ownerId, 'pending');
   // Prefer the pending intents with the exact amount, which keeps the chance of a chance collision negligible.
@@ -115,6 +116,8 @@ export function ingestAuthenticatedMail(db, config, event, { reprocessQuarantine
         db.prepare("UPDATE donations SET status='confirmed',confirmed_at=? WHERE id=? AND status='pending'").run(now(), donation.id);
         donationId = donation.id; outcome = 'matched';
         audit(db, null, 'donation_confirmed', donation.id);
+        // Written in this transaction, delivered by the server process; no donor name or message ever goes into a notification.
+        queuePush(db, owner.id, { kind: 'donation', title: `Nowa wpłata: ${money(donation.amount)}`, body: `Zbiórka „${donation.campaign_title}”`, url: '/panel' });
       }
     }
     db.prepare('INSERT INTO bank_messages(id,fingerprint,owner_id,amount,title,account_mask,donation_id,status,reason,received_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(randomUUID(), event.fingerprint, owner?.id || null, parsed?.amount || null, parsed?.title || null, parsed?.accountMask || null, donationId, outcome, reason, now());

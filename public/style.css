@@ -134,3 +134,7 @@
 
 /* Tall pictures (e.g. phone screenshots) must not fill the whole screen */
 .rich img,.story-editor .ProseMirror img{max-height:620px;width:auto}
+
+/* Push notification opt-in */
+.push-card{display:flex;gap:20px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 28px;padding:20px 24px;background:var(--soft);border:1px solid var(--line);border-radius:var(--radius)}
+.push-card[hidden]{display:none}.push-card h2{margin:4px 0 6px;font-size:1.25rem}.push-card p{margin:0;max-width:62ch}.push-card .fine-print{margin-top:8px}.push-card .button{flex:0 0 auto}

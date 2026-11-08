@@ -17,6 +17,7 @@ import { sanitizeStory, textToHtml, STORY_MIN_TEXT, STORY_MAX_TEXT } from './sto
 import { authenticateBankMail, ingestAuthenticatedMail } from './bank.js';
 import { recordRejectedBankMail, preserveQuarantinedBankMail } from './bank-quarantine.js';
 import { transientCutoff } from './retention.js';
+import { createPush, queueAdminPush, PushError } from './push.js';
 
 export { verificationCode } from './domain.js';
 const sessionDuration = 1000 * 60 * 60 * 24 * 7;
@@ -35,7 +36,7 @@ const assetVersion = (() => {
 const asset = path => `${path}?v=${assetVersion}`;
 // Stories are stored as sanitised HTML; campaigns created before rich text keep their plain text and are shown as paragraphs.
 const storyHtml = campaign => campaign.story_format === 'html' ? campaign.story : textToHtml(campaign.story);
-export function createApp({ config, db, sendMail = createMailer(config, db) }) {
+export function createApp({ config, db, sendMail = createMailer(config, db), push = createPush(config, db) }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -50,6 +51,8 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   });
   app.use('/assets', express.static(resolve('public'), { maxAge: '1h', etag: true }));
   app.use('/brand', express.static(resolve('brand'), { maxAge: '1h' }));
+  // The service worker must be served from the site root to control it, and must never be served stale.
+  app.get('/sw.js', (req, res) => res.set({ 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/' }).sendFile(resolve('public/sw.js')));
   app.post('/api/bank-mail', express.raw({ type: 'message/rfc822', limit: '256kb' }), async (req, res) => {
     res.set('Cache-Control', 'no-store');
     if (!config.bankWebhookSecret || config.demo) return res.sendStatus(503);
@@ -61,7 +64,11 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     if (event.rejected) {
       if (event.diagnostics) console.warn('Bank mail signature policy:', JSON.stringify(event.diagnostics));
       recordRejectedBankMail(db, config, req.body, event);
-    } else if (ingestAuthenticatedMail(db, config, event) === 'quarantined') preserveQuarantinedBankMail(db, config, req.body);
+    } else {
+      const outcome = ingestAuthenticatedMail(db, config, event);
+      if (outcome === 'quarantined') preserveQuarantinedBankMail(db, config, req.body);
+      else if (outcome === 'matched') push.kick();
+    }
     res.sendStatus(204);
   });
   const smallForm = express.urlencoded({ extended: false, limit: '40kb' }), storyForm = express.urlencoded({ extended: false, limit: '256kb' });
@@ -318,7 +325,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   app.get('/panel', requireUser, async (req, res) => {
     const notices = { registered: 'Konto utworzone. Sprawdź pocztę i potwierdź adres e-mail.', 'verified-email': 'Adres e-mail potwierdzony.', 'mail-sent': 'Wiadomość wysłana. Sprawdź swoją skrzynkę.', 'mail-error': 'Nie udało się wysłać wiadomości. Spróbuj ponownie lub skontaktuj się z operatorem.', 'bank-sent': 'Dane wysłane do weryfikacji. Teraz skonfiguruj powiadomienia bankowe.', saved: 'Zmiany zapisane.', submitted: 'Zbiórka czeka na sprawdzenie przez operatora.' };
     const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.strona, 10) || 1));
-    res.render('dashboard', { title: 'Twoje centrum pomagania', ...dashboard(req.user.id, page), mobywatel: await mobywatelCheck(req.user), page, notice: notices[req.query.notice] || null });
+    res.render('dashboard', { title: 'Twoje centrum pomagania', pushKey: push.publicKey(), ...dashboard(req.user.id, page), mobywatel: await mobywatelCheck(req.user), page, notice: notices[req.query.notice] || null });
   });
   app.get('/panel/weryfikacja', requireUser, async (req, res) => res.render('bank', { title: 'Weryfikacja organizatora', values: req.user, mobywatel: await mobywatelCheck(req.user) }));
   app.get('/panel/niedopasowane-wplaty', requireUser, (req, res) => {
@@ -338,6 +345,16 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     if (!req.user) return res.sendStatus(401);
     res.json({ notificationSeen: Boolean(req.user.bank_notification_seen), status: req.user.verification_status, startedAt: req.user.verification_started_at || null, mobywatelExpiresAt: (req.user.mobywatel_code || req.user.mobywatel_manual_code) && req.user.verification_status === 'pending' && req.user.mobywatel_code_expires_at > Date.now() ? req.user.mobywatel_code_expires_at : null });
   });
+  // Push subscriptions (one per browser). The service worker and the opt-in button live in public/sw.js and public/app.js.
+  const requireUserApi = (req, res, next) => req.user ? next() : res.status(401).json({ error: 'Zaloguj się ponownie.' });
+  const pushLimit = limiter('push-user', 30, 15 * 60000, req => req.user.id);
+  app.post('/api/push/subscribe', requireUserApi, pushLimit, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try { push.subscribe(req.user.id, req.body); push.kick(); res.status(201).json({ ok: true }); }
+    catch (error) { if (error instanceof PushError) return res.status(422).json({ error: error.message }); throw error; }
+  });
+  app.post('/api/push/status', requireUserApi, readLimit, (req, res) => res.set('Cache-Control', 'no-store').json({ subscribed: push.isSubscribed(req.user.id, req.body?.endpoint) }));
+  app.post('/api/push/unsubscribe', requireUserApi, pushLimit, (req, res) => res.set('Cache-Control', 'no-store').json({ removed: push.unsubscribe(req.user.id, req.body?.endpoint) }));
   app.post('/panel/weryfikacja', requireUser, limiter('bank-submit-user', 10, 15 * 60000, req => req.user.id), (req, res) => {
     if (config.demo || ['verified', 'pending'].includes(req.user.verification_status)) return res.status(409).render('error', { title: 'Dane są zablokowane', message: 'Zmianę danych płatniczych uzgodnij z operatorem. Wymaga ponownej weryfikacji.' });
     if (!req.user.email_verified) return formError(res, 'bank', new Error('Najpierw potwierdź adres e-mail.'), { values: req.body });
@@ -406,6 +423,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
       }
       if (req.body.action === 'submit' && req.user.verification_status !== 'verified') throw new Error('Przed zgłoszeniem zbiórki ukończ weryfikację organizatora. Szkic możesz zapisać już teraz.');
       const status = req.body.action === 'submit' ? 'pending' : 'draft';
+      const newlySubmitted = status === 'pending' && campaign?.status !== 'pending';
       const campaignId = id || randomUUID();
       if (id) {
         db.prepare("UPDATE campaigns SET title=?,summary=?,story=?,story_format='html',category=?,location=?,cover=?,cover_media_id=?,goal=?,deadline=?,status=?,updated_at=? WHERE id=? AND owner_id=?").run(data.title, data.summary, story.html, data.category, data.location, cover, coverMediaId, data.goal, data.deadline || null, status, now(), id, req.user.id);
@@ -413,6 +431,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
         db.prepare("INSERT INTO campaigns(id,owner_id,slug,title,summary,story,story_format,category,location,cover,cover_media_id,goal,deadline,status,created_at,updated_at) VALUES (?,?,?,?,?,?,'html',?,?,?,?,?,?,?,?,?)").run(campaignId, req.user.id, `${slugify(data.title)}-${token(3)}`, data.title, data.summary, story.html, data.category, data.location, cover, coverMediaId, data.goal, data.deadline || null, status, now(), now());
       }
       audit(db, req.user.id, `campaign_${status}`, campaignId);
+      if (newlySubmitted) { queueAdminPush(db, { kind: 'campaign', title: 'Zbiórka czeka na akceptację', body: `„${data.title}” — ${req.user.name}`, url: '/admin' }); push.kick(); }
       res.redirect(`/panel?notice=${status === 'pending' ? 'submitted' : 'saved'}`);
     } catch (error) { formError(res, 'editor', error, { campaign, values: { ...req.body, story: sanitizeStory(req.body.story, { mediaAllowed: mediaId => MEDIA_ID.test(mediaId) && Boolean(db.prepare('SELECT 1 FROM media WHERE id=? AND owner_id=?').get(mediaId, req.user.id)) }).html } }); }
   }
@@ -468,7 +487,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   });
 
   app.get('/admin', requireAdmin, (req, res) => {
-    res.render('admin', { title: 'Panel operatora',
+    res.render('admin', { title: 'Panel operatora', pushKey: push.publicKey(),
       organizers: db.prepare("SELECT * FROM users WHERE verification_status IN ('pending','verified') ORDER BY submitted_at").all(),
       campaigns: db.prepare(`${aggregate} WHERE c.status='pending' ORDER BY c.updated_at`).all(),
       audits: db.prepare('SELECT a.*,u.name actor FROM audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 30').all(),

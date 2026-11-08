@@ -8,7 +8,7 @@ function browser(responses) {
  const document={hidden:false,querySelectorAll:()=>[],getElementById:()=>null,querySelector:selector=>selector==='[data-bank-verification]'?{dataset:{startedAt:'started'}}:null,addEventListener:(name,fn)=>{listeners[name]=fn;}};
  const window={location:{reload(){state.reloads++;}},addEventListener:(name,fn)=>{listeners[name]=fn;}};
  runInNewContext(readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),{
-  document,window,AbortSignal,
+  document,window,AbortSignal,navigator:{},
   setTimeout(fn,delay){const timer={fn,delay};timers.push(timer);return timer;},
   clearTimeout(timer){if(timer)timer.cleared=true;},
   async fetch(url,options){assert.equal(url,'/api/weryfikacja/status');assert.equal(options.cache,'no-store');state.requests++;return responses.shift();},

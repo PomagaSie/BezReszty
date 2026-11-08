@@ -57,7 +57,58 @@ if (bankVerification) {
 }
 if (payment) {
   const status = document.getElementById('payment-status'), button = document.getElementById('check-payment');
-  let timer, failures = 0, attempts = 0, running = false, confirmed = status.dataset.initialStatus === 'confirmed';
+  const startedAt = Date.now();
+  let timer, failures = 0, running = false, confirmed = status.dataset.initialStatus === 'confirmed';
+  const svg = (name, attributes = {}) => { const node = document.createElementNS('http://www.w3.org/2000/svg', name); for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value); return node; };
+  const checkmark = () => { const icon = svg('svg', { viewBox: '0 0 52 52', 'aria-hidden': 'true', class: 'check-draw' }); icon.append(svg('circle', { cx: 26, cy: 26, r: 24, class: 'check-circle' }), svg('path', { d: 'M15 27l8 8 15-17', class: 'check-tick' })); return icon; };
+  const confetti = () => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const canvas = document.createElement('canvas'); canvas.className = 'confetti'; canvas.setAttribute('aria-hidden', 'true');
+    const context = canvas.getContext('2d'), ratio = Math.min(devicePixelRatio || 1, 2);
+    const resize = () => { canvas.width = innerWidth * ratio; canvas.height = innerHeight * ratio; };
+    resize(); document.body.append(canvas);
+    const colors = ['#d6f267', '#075e54', '#ffffff', '#143c35', '#f2c94c', '#ff8a7a'];
+    const piece = (x, y, vx, vy) => ({ x, y, vx, vy, size: 6 + Math.random() * 7, color: colors[Math.floor(Math.random() * colors.length)], angle: Math.random() * 6.28, spin: (Math.random() - .5) * .35, round: Math.random() < .25 });
+    const pieces = [];
+    for (let i = 0; i < 90; i++) { const left = i % 2 === 0, angle = -(.9 + Math.random() * .6), speed = 11 + Math.random() * 9; pieces.push(piece(left ? 0 : innerWidth, innerHeight * .75, Math.cos(angle) * speed * (left ? 1 : -1) * .75, Math.sin(angle) * speed)); }
+    for (let i = 0; i < 70; i++) pieces.push(piece(Math.random() * innerWidth, -20 - Math.random() * innerHeight * .5, (Math.random() - .5) * 3, 2 + Math.random() * 3));
+    const began = performance.now();
+    const frame = time => {
+      const age = time - began; context.setTransform(1, 0, 0, 1, 0, 0); context.clearRect(0, 0, canvas.width, canvas.height); context.scale(ratio, ratio);
+      for (const p of pieces) {
+        p.vy += .32; p.vx *= .992; p.x += p.vx; p.y += p.vy; p.angle += p.spin;
+        context.save(); context.globalAlpha = Math.max(0, Math.min(1, (5200 - age) / 1200)); context.translate(p.x, p.y); context.rotate(p.angle); context.fillStyle = p.color;
+        if (p.round) { context.beginPath(); context.arc(0, 0, p.size / 2, 0, 6.28); context.fill(); } else context.fillRect(-p.size / 2, -p.size / 3, p.size, p.size * .6);
+        context.restore();
+      }
+      if (age < 5200) requestAnimationFrame(frame); else canvas.remove();
+    };
+    addEventListener('resize', resize); requestAnimationFrame(frame);
+  };
+  const thankYou = amount => {
+    const money = new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', maximumFractionDigits: amount % 100 ? 2 : 0 }).format(amount / 100);
+    const layer = document.createElement('div'); layer.className = 'thanks'; layer.setAttribute('role', 'dialog'); layer.setAttribute('aria-modal', 'true'); layer.setAttribute('aria-labelledby', 'thanks-title');
+    const card = document.createElement('div'); card.className = 'thanks-card';
+    const title = document.createElement('h2'); title.id = 'thanks-title'; title.textContent = 'Dziękujemy!';
+    const text = document.createElement('p'); text.textContent = `Twoje ${money} dotarło do organizatora — bez prowizji i bez reszty. To naprawdę robi różnicę.`;
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'button full'; close.textContent = 'Super, zamknij';
+    card.append(checkmark(), title, text, close); layer.append(card); document.body.append(layer);
+    const dismiss = () => { layer.classList.add('leaving'); setTimeout(() => layer.remove(), 250); removeEventListener('keydown', onKey); };
+    const onKey = event => { if (event.key === 'Escape') dismiss(); };
+    close.addEventListener('click', dismiss); layer.addEventListener('click', event => { if (event.target === layer) dismiss(); }); addEventListener('keydown', onKey);
+    close.focus({ preventScroll: true });
+  };
+  const markConfirmed = (amount, celebrate) => {
+    confirmed = true; clearTimeout(timer); status.classList.add('confirmed');
+    status.querySelector('.status-icon').replaceChildren(checkmark());
+    document.getElementById('status-title').textContent = 'Dziękujemy! Wpłata potwierdzona.';
+    document.getElementById('status-description').textContent = 'Twój dobry gest jest już na zbiórce.';
+    button.textContent = 'Wpłata potwierdzona ✓'; button.disabled = true;
+    if (celebrate) { confetti(); thankYou(amount); }
+  };
+  // Poll quickly right after the transfer, then back off. A hidden tab pauses and re-checks the moment it is visible again.
+  const delay = () => { const elapsed = Date.now() - startedAt, base = elapsed < 120000 ? 3000 : elapsed < 600000 ? 8000 : 20000; return Math.min(60000, base * (1 + failures)); };
+  const schedule = () => { clearTimeout(timer); if (!confirmed && Date.now() - startedAt < 4 * 3600000) timer = setTimeout(() => (document.hidden ? schedule() : check()), document.hidden ? 30000 : delay()); };
   async function check(manual = false) {
     if (running || confirmed) return;
     running = true; button.disabled = true;
@@ -65,23 +116,17 @@ if (payment) {
       const response = await fetch(`/api/wplaty/${encodeURIComponent(payment.dataset.paymentId)}`, { cache: 'no-store' });
       if (!response.ok) throw new Error('Request failed');
       const result = await response.json(); failures = 0;
-      if (result.status === 'confirmed') {
-        confirmed = true; status.classList.add('confirmed');
-        status.querySelector('.status-icon').textContent = '✓';
-        document.getElementById('status-title').textContent = 'Dziękujemy! Wpłata potwierdzona.';
-        document.getElementById('status-description').textContent = 'Twój dobry gest jest już na zbiórce.';
-        button.textContent = 'Wpłata potwierdzona ✓'; clearTimeout(timer);
-      } else if (manual) toast('Powiadomienie bankowe jeszcze nie dotarło. Sprawdź ponownie później.');
+      if (result.status === 'confirmed') markConfirmed(result.amount, true);
+      else if (manual) toast('Powiadomienie bankowe jeszcze nie dotarło. Sprawdź ponownie później.');
     } catch {
       failures++; if (manual) toast('Nie udało się sprawdzić statusu. Spróbuj ponownie.');
-    } finally {
-      running = false; button.disabled = confirmed;
-      attempts++; if (!confirmed && attempts < 180) { clearTimeout(timer); timer = setTimeout(() => { if (!document.hidden) void check(); else timer = setTimeout(() => check(), 30000); }, Math.min(60000, 10000 * (1 + failures))); }
-    }
+    } finally { running = false; button.disabled = confirmed; schedule(); }
   }
   button.disabled = confirmed;
-  button.addEventListener('click', () => { clearTimeout(timer); void check(true); });
-  if (!confirmed) timer = setTimeout(() => check(), 10000);
+  if (confirmed) status.querySelector('.status-icon').replaceChildren(checkmark());
+  button.addEventListener('click', () => void check(true));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !confirmed) { clearTimeout(timer); void check(); } });
+  if (!confirmed) timer = setTimeout(() => check(), 3000);
   window.addEventListener('pagehide', () => clearTimeout(timer));
 }
 

@@ -1,0 +1,11 @@
+<%- include('partials/head') %>
+<main id="main" class="shell narrow section prose">
+  <span class="eyebrow">POROZMAWIAJMY</span><h1>Kontakt</h1>
+  <p>Operatorem serwisu i administratorem danych jest <strong><%= config.operatorName %></strong><% if(config.operatorStatus) { %>, <%= config.operatorStatus %><% } %><% if(config.operatorLocation) { %>. Miejscowość: <%= config.operatorLocation %><% } %>.</p>
+  <% if(config.operatorEmail) { %><p>Kontakt prywatny: <a href="mailto:<%= config.operatorEmail %>"><%= config.operatorEmail %></a>.</p><% } else { %><p>Prywatny adres kontaktowy tej instancji nie został jeszcze skonfigurowany. Nie zamieszczaj danych osobowych w publicznych zgłoszeniach projektu.</p><% } %>
+  <p>Napisz w sprawie konta, reklamacji, danych osobowych lub podejrzenia nadużycia. Podaj adres zbiórki i krótki opis sprawy; w sprawie wpłaty możesz podać jej referencję. Jeśli sprawa dotyczy organizatora, którego adresu nie znasz, możesz poprosić o przekazanie mu Twojej wiadomości.</p>
+  <p>Nie wysyłaj haseł, kodów BLIK, kodów logowania, numerów kart, kopii dokumentów ani pełnej historii rachunku. Niedopasowane przelewy sprawdza właściciel rachunku w swoim panelu; operator nie ma podglądu tej listy w panelu administracyjnym.</p>
+  <p>Na reklamacje odpowiadamy w ciągu 14 dni od otrzymania. Wnioski dotyczące danych osobowych rozpatrujemy bez zbędnej zwłoki, co do zasady w ciągu miesiąca. Szczegóły znajdziesz w <a href="/zasady#reklamacje">regulaminie</a> i <a href="/prywatnosc#prawa">polityce prywatności</a>.</p>
+  <p>Zgłoszenie bezprawnej treści powinno wskazywać jej dokładny adres, uzasadnienie i dane kontaktowe do odpowiedzi. Nie musisz zakładać konta GitHub ani publikować zgłoszenia publicznie.</p>
+</main>
+<%- include('partials/footer') %>

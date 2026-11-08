@@ -13,6 +13,12 @@ services:
       PORT: 3000
       DB_PATH: /app/data/bezreszty.sqlite
       TRUST_PROXY: 1
+      OPERATOR_NAME: ${OPERATOR_NAME:-Operator instancji BezReszty}
+      OPERATOR_EMAIL: ${OPERATOR_EMAIL:-}
+      OPERATOR_STATUS: ${OPERATOR_STATUS:-}
+      OPERATOR_LOCATION: ${OPERATOR_LOCATION:-}
+      LEGAL_INFRASTRUCTURE: ${LEGAL_INFRASTRUCTURE:-}
+      LEGAL_TRANSFERS: ${LEGAL_TRANSFERS:-}
     volumes:
       - app_data:/app/data
     ports:

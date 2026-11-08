@@ -47,6 +47,7 @@ export function openDatabase(path) {
     CREATE INDEX IF NOT EXISTS campaign_status ON campaigns(status, created_at);
     CREATE INDEX IF NOT EXISTS donation_campaign ON donations(campaign_id, status);
     CREATE INDEX IF NOT EXISTS bank_owner ON bank_messages(owner_id, status);
+    CREATE INDEX IF NOT EXISTS bank_owner_received ON bank_messages(owner_id, status, received_at DESC);
     CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS campaign_owner ON campaigns(owner_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS donation_recent ON donations(campaign_id, status, confirmed_at DESC);
@@ -93,6 +94,11 @@ export function openDatabase(path) {
     if (!userColumns.has('mobywatel_manual_code')) db.exec('ALTER TABLE users ADD COLUMN mobywatel_manual_code TEXT');
     if (!userColumns.has('mfa_secret')) db.exec('ALTER TABLE users ADD COLUMN mfa_secret TEXT');
     if (!userColumns.has('mfa_last_step')) db.exec('ALTER TABLE users ADD COLUMN mfa_last_step INTEGER');
+    if (!userColumns.has('terms_version')) db.exec('ALTER TABLE users ADD COLUMN terms_version TEXT');
+    if (!userColumns.has('terms_accepted_at')) db.exec('ALTER TABLE users ADD COLUMN terms_accepted_at TEXT');
+    const donationColumns = new Set(db.prepare('PRAGMA table_info(donations)').all().map(column => column.name));
+    if (!donationColumns.has('publication_consent_at')) db.exec('ALTER TABLE donations ADD COLUMN publication_consent_at TEXT');
+    if (!donationColumns.has('publication_consent_version')) db.exec('ALTER TABLE donations ADD COLUMN publication_consent_version TEXT');
     const campaignColumns = new Set(db.prepare('PRAGMA table_info(campaigns)').all().map(column => column.name));
     // 'text' = legacy plain-text story (blank-line separated paragraphs); 'html' = sanitised rich text produced by src/story.js.
     if (!campaignColumns.has('story_format')) db.exec("ALTER TABLE campaigns ADD COLUMN story_format TEXT NOT NULL DEFAULT 'text'");

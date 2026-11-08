@@ -1,0 +1,26 @@
+<%- include('partials/head') %>
+<main id="main" class="shell section">
+  <a class="back-link" href="/panel">← Twój panel</a>
+  <div class="page-heading"><span class="eyebrow">TWOJE WPŁATY</span><h1>Niedopasowane wpłaty</h1>
+    <p>Powiadomienia z Twojego rachunku, których nie udało się przypisać do wpłaty. Są dostępne przez 30 dni, wyłącznie na Twoim koncie organizatora.</p></div>
+  <p class="alert">Te kwoty nie zwiększają sumy zbiórki. Sprawdź przelew w swoim banku i porównaj kwotę oraz tytuł z informacjami od wpłacającego. Nie wykonuj ponownego przelewu wyłącznie z powodu braku potwierdzenia.</p>
+  <% const reasons = {
+    unknown_or_ambiguous_reference: 'Nie udało się jednoznacznie rozpoznać tytułu wpłaty.',
+    amount_mismatch: 'Kwota różni się od zadeklarowanej na stronie.',
+    owner_unverified_or_demo: 'Konto organizatora nie było gotowe do przyjmowania wpłat.',
+    notification_predates_intent: 'Powiadomienie jest wcześniejsze niż zgłoszenie wpłaty.',
+    already_confirmed: 'Wpłata o tym tytule została już potwierdzona.',
+    verification_not_pending_or_stale: 'Przelew testowy nie odpowiada aktualnej weryfikacji.'
+  }; %>
+  <% if(messages.length) { %>
+    <div class="table-wrap"><table><thead><tr><th>Odebrano</th><th>Kwota</th><th>Tytuł</th><th>Wyjaśnienie</th></tr></thead><tbody>
+      <% messages.forEach(m => { %><tr><td><%= new Date(m.received_at).toLocaleString('pl-PL', {timeZone:'Europe/Warsaw'}) %></td><td><%= money(m.amount) %></td><td><%= m.title %></td><td><%= reasons[m.reason] %></td></tr><% }) %>
+    </tbody></table></div>
+  <% } else { %><p class="muted">Nie masz niedopasowanych wpłat z ostatnich 30 dni.</p><% } %>
+  <nav class="pagination" aria-label="Strony niedopasowanych wpłat">
+    <% if(page > 1) { %><a class="button secondary" href="/panel/niedopasowane-wplaty?strona=<%= page-1 %>">← Poprzednie</a><% } %>
+    <% if(hasNext) { %><a class="button secondary" href="/panel/niedopasowane-wplaty?strona=<%= page+1 %>">Następne →</a><% } %>
+  </nav>
+  <p>Operator serwisu nie widzi tej listy w swoim panelu. Jeśli potrzebujesz pomocy technicznej, napisz na <a href="/kontakt">adres kontaktowy</a>, przekazując tylko informacje niezbędne do wyjaśnienia problemu.</p>
+</main>
+<%- include('partials/footer') %>

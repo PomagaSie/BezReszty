@@ -72,7 +72,7 @@ function findDonation(db, ownerId, parsed) {
   // Prefer the pending intents with the exact amount, which keeps the chance of a chance collision negligible.
   const sameAmount = unique(pending.filter(d => d.amount === parsed.amount));
   if (sameAmount) return sameAmount === 'ambiguous' ? null : sameAmount;
-  // Otherwise report why it did not settle (wrong amount, already confirmed) for the operator's quarantine list.
+  // Otherwise report why it did not settle (wrong amount, already confirmed) for the account owner's unmatched-payment list.
   const anyPending = unique(pending);
   if (anyPending) return anyPending === 'ambiguous' ? null : anyPending;
   const confirmed = unique(db.prepare(`${select} ORDER BY d.confirmed_at DESC LIMIT 200`).all(ownerId, 'confirmed'));

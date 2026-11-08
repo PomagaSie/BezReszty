@@ -5,7 +5,7 @@
 
 BezReszty to otwarta aplikacja do prowadzenia zbiórek oparta na mechanizmie znanym z [ClassyCash](https://github.com/classy-cash/app): przelew na telefon BLIK z unikalnym tytułem i dopasowanie powiadomienia o uznaniu rachunku Alior Banku. Nie integrujemy terminala BLIK ani płatności sześciocyfrowym kodem. Nie przechowujemy środków.
 
-Organizator potrzebuje **darmowego konta w Alior Banku**, numeru telefonu zarejestrowanego do odbierania przelewów BLIK na ten rachunek oraz bankowych powiadomień wysyłanych na indywidualny adres e-mail z aplikacji. Wpłacający nie potrzebuje konta w BezReszty ani w Alior Banku.
+Organizator potrzebuje **rachunku w Alior Banku**, numeru telefonu zarejestrowanego do odbierania przelewów BLIK na ten rachunek oraz bankowych powiadomień wysyłanych na indywidualny adres e-mail z aplikacji. Wpłacający nie potrzebuje konta w BezReszty ani w Alior Banku.
 
 Jeśli BezReszty pomaga Ci pomagać, możesz dobrowolnie [postawić autorowi kawę ☕](https://suppi.pl/mleczakm) i wesprzeć rozwój projektu.
 
@@ -184,3 +184,7 @@ Sekrety pozostają w `/etc/bezreszty/runtime.env` (0600). Nie są w archiwum źr
 Domena `bezreszty.org.pl` na Outsiderze i konto `no-reply` służą wyłącznie SMTP. MX pozostają przy Cloudflare, więc nie potrzebujesz dodatkowych skrzynek przychodzących. `scripts/provision-outsider.mjs` potrafi idempotentnie dodać domenę i konto przez API DirectAdmin (z kluczem ograniczonym do domen i poczty). Wymaga zmiennych `DIRECTADMIN_USER`, `DIRECTADMIN_KEY` i `BEZRESZTY_ENV_FILE`; nie przyjmuje sekretów w argumentach i nie zmienia istniejącego hasła. Uprawnienia i rzeczywiste SPF/DKIM sprawdź u dostawcy. Dla instalacji bez klucza API konto można jednorazowo utworzyć w panelu.
 
 Po włączeniu DKIM pobierz publiczne rekordy domeny z panelu. Zapisz je w `deploy/mail-dns.json` według przykładu; `scripts/sync-mail-dns.mjs` i proces deployu utworzą lub zaktualizują je przez **cf CLI**. Skrypt DNS nie usuwa MX ani innych domen.
+
+### Prywatność i obsługa danych
+
+Publiczny regulamin, polityka prywatności i prywatny kontakt są pod `/zasady`, `/prywatnosc` i `/kontakt`. Procedury retencji, praw osób i dostępu do niedopasowanych wpłat opisano w [docs/PRIVACY-OPERATIONS.md](docs/PRIVACY-OPERATIONS.md). Serwer automatycznie usuwa niepotwierdzone zgłoszenia oraz niepotwierdzające wpłat metadane po 30 dniach, a także stare standardowe kopie bazy; dodatkowe eksporty i kopie u dostawcy wymagają odrębnej retencji. Szczegóły niedopasowanych przelewów widzi tylko właściciel rachunku w swoim panelu, także gdy inny użytkownik ma rolę operatora.

@@ -17,5 +17,13 @@
   "enableSubaddressing": true,
   "redirectFrom": [
     "www.bezreszty.org.pl"
-  ]
+  ],
+  "publicInformation": {
+    "OPERATOR_NAME": "Michał Mleczko",
+    "OPERATOR_EMAIL": "do@mleczki.pl",
+    "OPERATOR_STATUS": "osoba prywatna prowadząca serwis we własnym imieniu",
+    "OPERATOR_LOCATION": "Radzymin",
+    "LEGAL_INFRASTRUCTURE": "Infrastruktura tej instancji obejmuje Mikrus (hosting serwera i przekazywanie ruchu przez Cytrus), Outsider (wysyłanie poczty) oraz Cloudflare (ochrona i przekazywanie ruchu, odbieranie powiadomień bankowych przez Email Routing i Worker).",
+    "LEGAL_TRANSFERS": "Korzystamy z globalnej infrastruktury Cloudflare, Inc., co może wiązać się z przetwarzaniem danych poza EOG, w tym w USA. Warunki przetwarzania Cloudflare przewidują standardowe klauzule umowne Komisji Europejskiej i dodatkowe zabezpieczenia dla transferów, które ich wymagają."
+  }
 }

@@ -22,6 +22,14 @@ for (const button of document.querySelectorAll('[data-amount]')) button.addEvent
   document.querySelectorAll('[data-amount]').forEach(b => { b.classList.toggle('selected', b === button); b.setAttribute('aria-pressed', String(b === button)); });
 });
 document.getElementById('amount')?.addEventListener('input', event => document.querySelectorAll('[data-amount]').forEach(b => { const selected = Number(b.dataset.amount) === Number(event.target.value); b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); }));
+const publicationConsent = document.querySelector('input[name="publishConsent"]');
+if (publicationConsent) {
+  const name = document.getElementById('donor-name'), message = document.getElementById('message');
+  const updateConsent = () => { publicationConsent.required = Boolean((name.value.trim() && name.value.trim() !== 'Anonimowo') || message.value.trim()); };
+  name.addEventListener('input', updateConsent); message.addEventListener('input', updateConsent);
+  publicationConsent.addEventListener('invalid', () => { publicationConsent.closest('details').open = true; });
+  updateConsent();
+}
 for (const form of document.querySelectorAll('form[data-confirm]')) form.addEventListener('submit', event => { if (!window.confirm(form.dataset.confirm)) event.preventDefault(); });
 const demoDialog = document.getElementById('demo-dialog');
 document.querySelector('[data-demo-payment]')?.addEventListener('click', () => demoDialog.showModal());

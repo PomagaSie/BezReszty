@@ -2,7 +2,7 @@
 
 ## Model
 
-Wpłata jest **przelewem na telefon BLIK**, bezpośrednio do organizatora. BezReszty generuje unikalny, losowy kod przelewu z 4 znaków (np. `K7M2`; alfabet bez mylących znaków 0/O i 1/I, ok. milion kombinacji). Odbiorca musi mieć telefon zarejestrowany do odbioru BLIK na swoim darmowym koncie Alior Banku. Alternatywnie strona wpłaty pokazuje zwykły przelew na ten sam rachunek, z identycznym tytułem i kwotą.
+Wpłata jest **przelewem na telefon BLIK**, bezpośrednio do organizatora. BezReszty generuje unikalny, losowy kod przelewu z 4 znaków (np. `K7M2`; alfabet bez mylących znaków 0/O i 1/I, ok. milion kombinacji). Odbiorca musi mieć telefon zarejestrowany do odbioru BLIK na swoim rachunku Alior Banku. Alternatywnie strona wpłaty pokazuje zwykły przelew na ten sam rachunek, z identycznym tytułem i kwotą.
 
 Aplikacja nie inicjuje przelewu i nie ma dostępu do bankowości użytkownika. Nie używa sześciocyfrowych kodów BLIK, PSD2 ani bramki płatniczej.
 
@@ -57,16 +57,18 @@ npm run mail:sync
 
 Importer zapisuje UIDVALIDITY i ostatni UID, przetwarza do 100 wiadomości na przebieg, nie kasuje wiadomości i nie zmienia flag przeczytania. Gdy UIDVALIDITY się zmieni, ponowne przejrzenie skrzynki jest bezpieczne dzięki deduplikacji. Tymczasowy błąd DNS lub połączenia nie przesuwa kursora ponad nieprzetworzoną wiadomość; kolejna próba nastąpi automatycznie.
 
-Zalecana retencja skrzynki powinna uwzględniać czas potrzebny na wyjaśnienie błędów i obowiązki operatora. Aplikacja nie usuwa e-maili dostawcy poczty. Nie trzymaj latami zbędnych powiadomień.
+Dla wariantu IMAP ustaw usuwanie oryginałów u dostawcy zgodnie z polityką instancji (najwyżej 30 dni dla zwykłej diagnostyki). Aplikacja nie usuwa e-maili dostawcy poczty. Wdrożenie bezreszty.org.pl używa Workera, bez skrzynki bankowych powiadomień.
 
 ## Kwarantanna
 
-W `/admin` widać wyjątki, np. `amount_mismatch`, `account_mismatch`, `unknown_or_ambiguous_reference`, `dkim_not_authenticated`. Takie zdarzenia nie zwiększają sumy zbiórki. Wyjaśniaj je z organizatorem na podstawie historii jego rachunku. Nie ma przycisku do zatwierdzania niesprawdzonego e-maila. Jeśli bank zmieni format, popraw parser i dodaj zanonimizowany test regresyjny przed ponownym importem.
+Szczegóły niedopasowanych przelewów są widoczne wyłącznie w `/panel/niedopasowane-wplaty`, po zalogowaniu na konto właściciela rachunku. Zapytanie zawsze używa identyfikatora zalogowanego użytkownika; rola admin nie daje obejścia. Panel `/admin` nie pobiera ani nie wyświetla tej listy. Dopuszczane są tylko przyczyny wskazujące na rozpoznany rachunek (np. `amount_mismatch`, `unknown_or_ambiguous_reference`); rekordy z błędnym rachunkiem, nierozpoznanym odbiorcą lub odrzuconym podpisem nie są ujawniane użytkownikom. Lista nie pokazuje rekordów starszych niż 30 dni.
 
-Zapisywane są tylko fingerprint, organizator, kwota, tytuł, maska rachunku, status i referencja wpłaty. Treść wiadomości i nazwa bankowego nadawcy nie trafiają do bazy ani logów aplikacji.
+Zdarzenia te nie zwiększają sum zbiórek. Organizator wyjaśnia je na podstawie własnej historii banku. Nie ma przycisku do zatwierdzania niesprawdzonego e-maila. Pomoc techniczna otrzymuje tylko informacje dobrowolnie przekazane przez organizatora, nie automatyczny dostęp do jego przelewów.
+
+Zapisywane są tylko fingerprint, organizator, kwota, tytuł, maska rachunku, status i referencja wpłaty. Poza opisaną niżej krótkotrwałą kwarantanną treść wiadomości i nazwa bankowego nadawcy nie trafiają do trwałej ewidencji ani logów aplikacji. Metadane niepotwierdzające wpłat są automatycznie usuwane po 30 dniach.
 
 ### Krótkotrwała diagnostyka podpisu
 
 Webhook zapisuje wiadomości odrzucone przez DKIM lub niedopasowane do wpłaty w szyfrowanej kwarantannie AES-256-GCM na maksymalnie godzinę (do 20 wiadomości). Klucz wyprowadza HKDF z sekretu webhooka, a fingerprint jest uwierzytelnionymi metadanymi szyfrogramu. W logach pojawiają się wyłącznie status podpisu, domena i brakujące nagłówki, bez treści, adresów odbiorców ani kwot. Serwer usuwa przeterminowane wpisy co 30 sekund; skrypt kopii bazy usuwa kwarantannę z eksportu.
 
-Po poprawieniu i przetestowaniu walidacji operator może wykonać `docker exec bezreszty-app-1 node scripts/reprocess-bank-mail.js`. Polecenie ponownie sprawdza prawdziwy DKIM i wszystkie warunki dopasowania; nie ma trybu pomijania uwierzytelnienia. Pomyślnie przetworzony oryginał jest usuwany, a zatwierdzone wpłaty są nadal chronione przed powtórzeniem. Rotacja sekretu webhooka uniemożliwia odszyfrowanie wcześniejszej kwarantanny.
+Po poprawieniu i przetestowaniu walidacji administrator infrastruktury może wykonać `docker exec bezreszty-app-1 node scripts/reprocess-bank-mail.js`. Polecenie ponownie sprawdza prawdziwy DKIM i wszystkie warunki dopasowania; nie ma trybu pomijania uwierzytelnienia. Pomyślnie przetworzony oryginał jest usuwany, a zatwierdzone wpłaty są nadal chronione przed powtórzeniem. Rotacja sekretu webhooka uniemożliwia odszyfrowanie wcześniejszej kwarantanny.

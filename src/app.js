@@ -16,6 +16,7 @@ import { MEDIA_ID, MAX_UPLOAD_BYTES, UPLOAD_TYPES, MediaError, processImage, sto
 import { sanitizeStory, textToHtml, STORY_MIN_TEXT, STORY_MAX_TEXT } from './story.js';
 import { authenticateBankMail, ingestAuthenticatedMail } from './bank.js';
 import { recordRejectedBankMail, preserveQuarantinedBankMail } from './bank-quarantine.js';
+import { transientCutoff } from './retention.js';
 
 export { verificationCode } from './domain.js';
 const sessionDuration = 1000 * 60 * 60 * 24 * 7;
@@ -150,6 +151,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
   app.get('/jak-to-dziala', (req, res) => res.render('how', { title: 'Jak działa BezReszty' }));
   app.get('/zasady', (req, res) => res.render('legal', { title: 'Zasady korzystania', type: 'terms' }));
   app.get('/prywatnosc', (req, res) => res.render('legal', { title: 'Prywatność', type: 'privacy' }));
+  app.get('/kontakt', (req, res) => res.render('contact', { title: 'Kontakt' }));
   app.get('/rejestracja', (req, res) => req.user ? res.redirect('/panel') : res.render('auth', { title: 'Załóż konto organizatora', mode: 'register' }));
   app.post('/rejestracja', authLimit, async (req, res) => {
     if (config.demo) return res.status(403).render('error', { title: 'Tryb demonstracyjny', message: 'Demo nie przyjmuje rejestracji ani prawdziwych danych.' });
@@ -159,7 +161,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     const exists = db.prepare('SELECT id FROM users WHERE email=?').get(data.email);
     if (exists) return res.render('auth', { mode: 'login', notice: 'Jeśli masz już konto, zaloguj się lub skorzystaj z odzyskiwania hasła.' });
     const user = { id: randomUUID(), ...data };
-    db.prepare('INSERT INTO users(id,email,name,password,notification_alias,created_at) VALUES (?,?,?,?,?,?)').run(user.id, user.email, user.name, await passwordHash(data.password), token(16), now());
+    db.prepare('INSERT INTO users(id,email,name,password,notification_alias,created_at,terms_version,terms_accepted_at) VALUES (?,?,?,?,?,?,?,?)').run(user.id, user.email, user.name, await passwordHash(data.password), token(16), now(), config.legalVersion, now());
     createSession(res, user.id);
     try { await sendMail(user, 'verify'); }
     catch { return res.redirect('/panel?notice=mail-error'); }
@@ -319,6 +321,18 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     res.render('dashboard', { title: 'Twoje centrum pomagania', ...dashboard(req.user.id, page), mobywatel: await mobywatelCheck(req.user), page, notice: notices[req.query.notice] || null });
   });
   app.get('/panel/weryfikacja', requireUser, async (req, res) => res.render('bank', { title: 'Weryfikacja organizatora', values: req.user, mobywatel: await mobywatelCheck(req.user) }));
+  app.get('/panel/niedopasowane-wplaty', requireUser, (req, res) => {
+    const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.strona, 10) || 1));
+    // A role=admin is deliberately NOT an ownership override. Positive reason
+    // allowlist also excludes legacy rows with an unverified account/recipient.
+    const messages = db.prepare(`SELECT amount,title,reason,received_at FROM bank_messages
+      WHERE owner_id=? AND status='quarantined' AND received_at>?
+      AND reason IN ('unknown_or_ambiguous_reference','amount_mismatch','owner_unverified_or_demo',
+        'notification_predates_intent','already_confirmed','verification_not_pending_or_stale')
+      ORDER BY received_at DESC,id DESC LIMIT 51 OFFSET ?`).all(req.user.id, transientCutoff(), (page - 1) * 50);
+    res.set('Cache-Control', 'no-store');
+    res.render('unmatched-payments', { title: 'Niedopasowane wpłaty', messages: messages.slice(0, 50), hasNext: messages.length > 50, page });
+  });
   app.get('/api/weryfikacja/status', readLimit, (req, res) => {
     res.set('Cache-Control', 'no-store');
     if (!req.user) return res.sendStatus(401);
@@ -425,6 +439,8 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
       if (amount < 100 || amount > 1000000) throw new Error('Jednorazowo możesz wesprzeć zbiórkę kwotą od 1 do 10 000 zł.');
       const donor = String(req.body.name || '').trim().slice(0, 60) || 'Anonimowo';
       const message = String(req.body.message || '').trim().slice(0, 300);
+      const publishPersonalText = donor !== 'Anonimowo' || Boolean(message);
+      if (publishPersonalText && req.body.publishConsent !== 'on') throw new Error('Zaznacz zgodę na publikację podpisu i komentarza albo pozostaw te pola puste.');
       const id = token();
       let code;
       for (let attempt = 0; attempt < 50; attempt++) {
@@ -433,9 +449,9 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
         code = null;
       }
       if (!code) throw new Error('Nie udało się wygenerować kodu przelewu. Spróbuj ponownie.');
-      db.prepare('INSERT INTO donations(id,campaign_id,code,amount,name,message,created_at) VALUES (?,?,?,?,?,?,?)').run(id, campaign.id, code, amount, donor, message, now());
+      db.prepare('INSERT INTO donations(id,campaign_id,code,amount,name,message,created_at,publication_consent_at,publication_consent_version) VALUES (?,?,?,?,?,?,?,?,?)').run(id, campaign.id, code, amount, donor, message, now(), publishPersonalText ? now() : null, publishPersonalText ? config.legalVersion : null);
       res.redirect(`/wplata/${id}`);
-    } catch (error) { res.status(422).render('error', { title: 'Sprawdź kwotę wpłaty', message: error.message }); }
+    } catch (error) { res.status(422).render('error', { title: 'Sprawdź dane wpłaty', message: error.message }); }
   });
   const payment = id => db.prepare(`SELECT d.*,c.slug,c.title,c.is_demo,u.name organizer,u.phone,u.iban,u.verification_status FROM donations d JOIN campaigns c ON c.id=d.campaign_id JOIN users u ON u.id=c.owner_id WHERE d.id=?`).get(id);
   app.get('/wplata/:id', (req, res) => {
@@ -455,7 +471,6 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     res.render('admin', { title: 'Panel operatora',
       organizers: db.prepare("SELECT * FROM users WHERE verification_status IN ('pending','verified') ORDER BY submitted_at").all(),
       campaigns: db.prepare(`${aggregate} WHERE c.status='pending' ORDER BY c.updated_at`).all(),
-      messages: db.prepare('SELECT b.*,u.name organizer FROM bank_messages b LEFT JOIN users u ON u.id=b.owner_id WHERE b.status NOT IN (\'matched\',\'verification\',\'ignored\') ORDER BY b.received_at DESC LIMIT 50').all(),
       audits: db.prepare('SELECT a.*,u.name actor FROM audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 30').all(),
     });
   });

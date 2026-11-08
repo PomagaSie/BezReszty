@@ -7,7 +7,7 @@ import { ingestAuthenticatedMail } from '../src/bank.js';
 
 test('public pages render, errors stay escaped and responses have protective headers',async()=>{
  const {app,db}=setup();const owner=await addUser(db);const campaign=addCampaign(db,owner);
- for(const route of ['/','/zbiorki','/zbiorki?q=Pomagamy','/zbiorki?kategoria=pomoc','/jak-to-dziala','/zasady','/prywatnosc','/logowanie','/rejestracja','/odzyskaj-haslo','/nowe-haslo?token=x',`/zbiorka/${campaign.slug}`]){
+ for(const route of ['/','/zbiorki','/zbiorki?q=Pomagamy','/zbiorki?kategoria=pomoc','/jak-to-dziala','/zasady','/prywatnosc','/kontakt','/logowanie','/rejestracja','/odzyskaj-haslo','/nowe-haslo?token=x',`/zbiorka/${campaign.slug}`]){
   const response=await request(app).get(route);assert.equal(response.status,200,route);assert.match(response.headers['content-security-policy'],/frame-ancestors 'none'/);assert.doesNotMatch(response.text,/<%/);
  }
  const xss=await request(app).get('/zbiorki').query({q:'<script>alert(1)</script>'});assert.doesNotMatch(xss.text,/<script>alert/);assert.match(xss.text,/&lt;script&gt;/);
@@ -97,7 +97,7 @@ test('donation intent is pending; exact settlement is exclusively a bank-mail op
  const {app,db}=setup();const owner=await addUser(db),campaign=addCampaign(db,owner),agent=request.agent(app);
  const _csrf=await csrf(agent,`/zbiorka/${campaign.slug}`);
  for(const amount of ['0','-1','10001','10.999','1e3'])assert.equal((await agent.post(`/zbiorka/${campaign.slug}/wesprzyj`).type('form').send({_csrf,amount})).status,422);
- const response=await agent.post(`/zbiorka/${campaign.slug}/wesprzyj`).type('form').send({_csrf,amount:'50.29',name:'<script>bad</script>',status:'confirmed'});
+ const response=await agent.post(`/zbiorka/${campaign.slug}/wesprzyj`).type('form').send({_csrf,amount:'50.29',name:'<script>bad</script>',publishConsent:'on',status:'confirmed'});
  assert.equal(response.status,302);const donation=db.prepare('SELECT * FROM donations').get();assert.equal(donation.status,'pending');assert.equal(donation.amount,5029);
  assert.equal((await agent.get(response.headers.location)).status,200);
  assert.deepEqual((await agent.get(`/api/wplaty/${donation.id}`)).body,{status:'pending',amount:5029});

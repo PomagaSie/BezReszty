@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { dkimSign } from 'mailauth/lib/dkim/sign';
 import { authenticateBankMail, ingestAuthenticatedMail } from '../src/bank.js';
+import { titleHasCode,newTransferCode,CODE_ALPHABET } from '../src/domain.js';
 import { setup,addUser,addCampaign,addDonation } from './helpers.js';
 const eventFor=(owner,donation,overrides={})=>({fingerprint:crypto.randomUUID(),recipient:`${owner.notification_alias}@powiadomienia.localhost`,subject:`Uznanie rachunku 96...0001 kwotą 50,00 PLN`,body:`Uznanie kwotą 50,00 PLN\nNadawca: TEST\nTytuł zlecenia: ${donation.code}\n`,date:new Date().toISOString(),...overrides});
 test('only a verified owner, matching destination, exact amount and reference settle a donation',async()=>{
- const {db,config}=setup();const owner=await addUser(db),other=await addUser(db);const c=addCampaign(db,owner),d=addDonation(db,c);
- for(const event of [eventFor(other,d),eventFor(owner,d,{subject:'Uznanie rachunku 96...9999 kwotą 50,00 PLN'}),eventFor(owner,d,{body:`kwotą 60,00 PLN\nNadawca: TEST\nTytuł zlecenia: ${d.code}\n`,subject:'Uznanie rachunku 96...0001 kwotą 60,00 PLN'}),eventFor(owner,d,{body:`kwotą 50,00 PLN\nNadawca: TEST\nTytuł zlecenia: ${d.code} BR-AABBCCDDEEFF\n`})]){
+ const {db,config}=setup();const owner=await addUser(db),other=await addUser(db);const c=addCampaign(db,owner),d=addDonation(db,c),d2=addDonation(db,c,{code:d0(d.code)});
+ for(const event of [eventFor(other,d),eventFor(owner,d,{subject:'Uznanie rachunku 96...9999 kwotą 50,00 PLN'}),eventFor(owner,d,{body:`kwotą 60,00 PLN\nNadawca: TEST\nTytuł zlecenia: ${d.code}\n`,subject:'Uznanie rachunku 96...0001 kwotą 60,00 PLN'}),eventFor(owner,d,{body:`kwotą 50,00 PLN\nNadawca: TEST\nTytuł zlecenia: ${d.code} ${d2.code}\n`})]){
   assert.equal(ingestAuthenticatedMail(db,config,event),'quarantined');
   assert.equal(db.prepare('SELECT status FROM donations WHERE id=?').get(d.id).status,'pending');
  }
@@ -88,5 +89,29 @@ test('cryptographic DKIM verification rejects unsigned, tampered, readdressed an
  assert.equal((await authenticateBankMail(duplicated,config,{resolver})).rejected,'duplicate_headers');
  const forgedHeaders=Buffer.from('Authentication-Results: attacker; dkim=pass header.d=alior.pl\r\n'+source.toString());
  assert.equal((await authenticateBankMail(forgedHeaders,config,{resolver})).rejected,'dkim_not_authenticated');
+ db.close();
+});
+
+const d0=code=>[...CODE_ALPHABET].find(ch=>ch!==code[0])+'XYZ';
+test('transfer codes are four characters from an unambiguous alphabet',()=>{
+ for(let i=0;i<500;i++)assert.match(newTransferCode(),/^[2-9A-HJ-NP-Z]{4}$/);
+});
+test('title matching tolerates stray spaces, case and extra text but not neighbouring letters or digits',()=>{
+ for(const title of ['ABC1','A BC1','AB C1','A B C 1','abc1','Dla Ani ABC1 dziękuję!','WPŁATA: A-B.C 1','ABC1\u00a0'.trim()])assert.ok(titleHasCode(title,'ABC1'),title);
+ for(const title of ['ABC12','XABC1','ABC','AB C','ŻABC1','AB1C','1ABC','']) assert.ok(!titleHasCode(title,'ABC1'),title);
+ assert.ok(titleHasCode('123 A','123A'));assert.ok(titleHasCode('kiddo 1 2 3A pozdrawiam','123A'));
+ assert.ok(titleHasCode('BR-AABBCCDDEEFF','BR-AABBCCDDEEFF'));
+});
+test('a donation is settled by a sloppy title only for its own organizer, amount and a single candidate',async()=>{
+ const {db,config}=setup();const owner=await addUser(db),other=await addUser(db);
+ const c=addCampaign(db,owner),otherCampaign=addCampaign(db,other);
+ const spaced=code=>code.slice(0,1)+' '+code.slice(1);
+ const d=addDonation(db,c,{code:'7K3Q'}),twin=addDonation(db,otherCampaign,{code:'7K3R'}); // another organizer's pending donation never interferes
+ assert.equal(ingestAuthenticatedMail(db,config,eventFor(owner,d,{body:`kwotą 50,00 PLN\nNadawca: KIDDO\nTytuł zlecenia: wpłata od kiddo ${spaced(d.code)} dzięki\n`})),'matched');
+ assert.equal(db.prepare('SELECT status FROM donations WHERE id=?').get(d.id).status,'confirmed');
+ assert.equal(db.prepare('SELECT status FROM donations WHERE id=?').get(twin.id).status,'pending');
+ const again=addDonation(db,c,{code:'ZZ22'});
+ assert.equal(ingestAuthenticatedMail(db,config,eventFor(owner,again,{body:`kwotą 50,00 PLN\nNadawca: X\nTytuł zlecenia: ZZ223\n`})),'quarantined');
+ assert.equal(ingestAuthenticatedMail(db,config,eventFor(owner,again,{body:`kwotą 50,00 PLN\nNadawca: X\nTytuł zlecenia: Z Z 2 2\n`})),'matched');
  db.close();
 });

@@ -8,7 +8,7 @@ import { resolve, join } from 'node:path';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { audit, now, transaction } from './db.js';
-import { notificationAddress, verificationCode, todayWarsaw, categories, covers, money, token, hash, passwordHash, passwordMatches, passwordNeedsRehash, dummyPasswordHash, registrationSchema, bankSchema, campaignSchema, toCents, slugify } from './domain.js';
+import { newTransferCode, notificationAddress, verificationCode, todayWarsaw, categories, covers, money, token, hash, passwordHash, passwordMatches, passwordNeedsRehash, dummyPasswordHash, registrationSchema, bankSchema, campaignSchema, toCents, slugify } from './domain.js';
 import { SqliteRateLimitStore } from './rate-limits.js';
 import { createMfaSecret, mfaTotp, encryptMfaSecret, decryptMfaSecret, mfaStep, consumeMfaCode, createRecoveryCodes } from './mfa.js';
 import { createMailer } from './email.js';
@@ -387,7 +387,14 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
       if (amount < 100 || amount > 1000000) throw new Error('Jednorazowo możesz wesprzeć zbiórkę kwotą od 1 do 10 000 zł.');
       const donor = String(req.body.name || '').trim().slice(0, 60) || 'Anonimowo';
       const message = String(req.body.message || '').trim().slice(0, 300);
-      const id = token(), code = `BR-${token(6).toUpperCase()}`;
+      const id = token();
+      let code;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        code = newTransferCode();
+        if (!db.prepare('SELECT 1 FROM donations WHERE code=?').get(code)) break;
+        code = null;
+      }
+      if (!code) throw new Error('Nie udało się wygenerować kodu przelewu. Spróbuj ponownie.');
       db.prepare('INSERT INTO donations(id,campaign_id,code,amount,name,message,created_at) VALUES (?,?,?,?,?,?,?)').run(id, campaign.id, code, amount, donor, message, now());
       res.redirect(`/wplata/${id}`);
     } catch (error) { res.status(422).render('error', { title: 'Sprawdź kwotę wpłaty', message: error.message }); }

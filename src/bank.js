@@ -3,7 +3,7 @@ import { simpleParser } from 'mailparser';
 import { ImapFlow } from 'imapflow';
 import { randomUUID } from 'node:crypto';
 import { signedMultipartSource } from './shared/bank-mail-mime.js';
-import { verificationCode, accountMatches, toCents, hash } from './domain.js';
+import { verificationCode, accountMatches, toCents, hash, titleHasCode } from './domain.js';
 import { now, transaction, audit } from './db.js';
 
 const clean = text => text.replace(/<[^>]*>/g, '').replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').trim();
@@ -63,6 +63,22 @@ export async function authenticateBankMail(raw, config, options = {}) {
   return { fingerprint: hash(signature.signature), recipient: recipients[0], subject: message.subject || '', body: content.html || content.text || '', date: date.toISOString() };
 }
 
+// Short codes are matched against this organizer's candidates only, never globally. The title may carry extra text and
+// stray spaces inside the code (see titleHasCode). A title that fits zero or several candidates is never guessed.
+function findDonation(db, ownerId, parsed) {
+  const select = "SELECT d.*,c.owner_id,c.is_demo FROM donations d JOIN campaigns c ON c.id=d.campaign_id WHERE c.owner_id=? AND d.status=?";
+  const unique = rows => { const hits = rows.filter(d => titleHasCode(parsed.title, d.code)); return hits.length === 1 ? hits[0] : hits.length ? 'ambiguous' : null; };
+  const pending = db.prepare(select).all(ownerId, 'pending');
+  // Prefer the pending intents with the exact amount, which keeps the chance of a chance collision negligible.
+  const sameAmount = unique(pending.filter(d => d.amount === parsed.amount));
+  if (sameAmount) return sameAmount === 'ambiguous' ? null : sameAmount;
+  // Otherwise report why it did not settle (wrong amount, already confirmed) for the operator's quarantine list.
+  const anyPending = unique(pending);
+  if (anyPending) return anyPending === 'ambiguous' ? null : anyPending;
+  const confirmed = unique(db.prepare(`${select} ORDER BY d.confirmed_at DESC LIMIT 200`).all(ownerId, 'confirmed'));
+  return confirmed === 'ambiguous' ? null : confirmed;
+}
+
 export function ingestAuthenticatedMail(db, config, event, { reprocessQuarantined = false } = {}) {
   return transaction(db, () => {
     const previous=db.prepare('SELECT id,status,reason FROM bank_messages WHERE fingerprint=?').get(event.fingerprint);
@@ -88,9 +104,7 @@ export function ingestAuthenticatedMail(db, config, event, { reprocessQuarantine
         audit(db, null, 'bank_notification_verified', owner.id);
       } else reason = 'verification_not_pending_or_stale';
     } else {
-      // A title with zero or multiple references must not be guessed or partially matched.
-      const codes = [...parsed.title.matchAll(/\bBR-[A-F0-9]{12}\b/g)].map(m => m[0]);
-      const donation = codes.length === 1 ? db.prepare('SELECT d.*,c.owner_id,c.is_demo FROM donations d JOIN campaigns c ON c.id=d.campaign_id WHERE d.code=?').get(codes[0]) : null;
+      const donation = findDonation(db, owner.id, parsed);
       if (!donation) reason = 'unknown_or_ambiguous_reference';
       else if (donation.owner_id !== owner.id) reason = 'owner_mismatch';
       else if (owner.verification_status !== 'verified' || donation.is_demo || config.demo) reason = 'owner_unverified_or_demo';

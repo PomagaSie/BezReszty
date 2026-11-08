@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { openDatabase, now } from '../src/db.js';
-import { token, passwordHash } from '../src/domain.js';
+import { token, passwordHash, newTransferCode } from '../src/domain.js';
 import { readConfig } from '../src/config.js';
 import { createApp } from '../src/app.js';
 import { createMfaSecret, encryptMfaSecret, mfaTotp } from '../src/mfa.js';
@@ -46,7 +46,7 @@ export function enableMfa(db, user, config = { mfaEncryptionKey: testMfaKey }) {
   return user;
 }
 export function addDonation(db,c,options={}) {
-  const d={id:token(),campaign_id:c.id,code:`BR-${token(6).toUpperCase()}`,amount:5000,...options};
+  const d={id:token(),campaign_id:c.id,code:newTransferCode(),amount:5000,...options};
   db.prepare('INSERT INTO donations(id,campaign_id,code,amount,created_at) VALUES (?,?,?,?,?)').run(d.id,d.campaign_id,d.code,d.amount,new Date(Date.now()-10000).toISOString());
   return d;
 }

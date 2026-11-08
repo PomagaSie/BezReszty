@@ -2,7 +2,7 @@
 
 ## Model
 
-Wpłata jest **przelewem na telefon BLIK**, bezpośrednio do organizatora. BezReszty generuje unikalny tytuł `BR-<12 losowych znaków hex>`. Odbiorca musi mieć telefon zarejestrowany do odbioru BLIK na swoim darmowym koncie Alior Banku. Alternatywnie strona wpłaty pokazuje zwykły przelew na ten sam rachunek, z identycznym tytułem i kwotą.
+Wpłata jest **przelewem na telefon BLIK**, bezpośrednio do organizatora. BezReszty generuje unikalny, losowy kod przelewu z 4 znaków (np. `K7M2`; alfabet bez mylących znaków 0/O i 1/I, ok. milion kombinacji). Odbiorca musi mieć telefon zarejestrowany do odbioru BLIK na swoim darmowym koncie Alior Banku. Alternatywnie strona wpłaty pokazuje zwykły przelew na ten sam rachunek, z identycznym tytułem i kwotą.
 
 Aplikacja nie inicjuje przelewu i nie ma dostępu do bankowości użytkownika. Nie używa sześciocyfrowych kodów BLIK, PSD2 ani bramki płatniczej.
 
@@ -43,7 +43,7 @@ Format wiadomości i podpisy zweryfikuj na rzeczywistym bankowym powiadomieniu d
 - Pojedynczy podpisany adres `To` równy aliasowi znanego organizatora.
 - Temat `Uznanie rachunku 46...5420 kwotą 50,00 PLN`, zgodność kwoty w treści i temacie.
 - Rachunek z tematu odpowiada zweryfikowanemu rachunkowi organizatora (pełny numer albo pierwsze 2 i ostatnie 4 cyfry maski). Maska sama w sobie nie dowodzi własności — dlatego jest też alias i ręczna weryfikacja.
-- Dokładnie jedna znana referencja wpłaty w tytule, właściciel zbiórki zgodny z aliasem, dokładna kwota w groszach i brak wcześniejszego potwierdzenia.
+- Kod wpłaty rozpoznany w tytule: dozwolony dodatkowy tekst, wielkość liter i odstępy w środku kodu (`K 7M2`, `K7 M2`). Kod nie może przylegać do innych liter ani cyfr. Szukamy go tylko wśród oczekujących wpłat tego organizatora (najpierw o tej samej kwocie); gdy pasuje więcej niż jedna, powiadomienie trafia do kwarantanny. Starsze kody `BR-…` nadal działają. Do tego właściciel zbiórki zgodny z aliasem, dokładna kwota w groszach i brak wcześniejszego potwierdzenia.
 
 Weryfikujemy podpis kryptograficznie przez DNS, **nie ufamy tekstowi nagłówka Authentication-Results**. Nie dodawaj domen podpisu bez sprawdzenia rzeczywistego nadawcy i infrastruktury banku. Nie ma przełącznika „pomijaj DKIM”.
 

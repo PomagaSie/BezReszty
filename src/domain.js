@@ -1,4 +1,4 @@
-import { randomBytes, createHash, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomInt, createHash, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 const scrypt = promisify(scryptCallback);
@@ -18,6 +18,19 @@ async function derivePassword(password, salt, options) {
 }
 export const todayWarsaw = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 export const verificationCode = user => user.verification_code || null;
+// Transfer code a donor types into the bank form: 4 characters, no look-alikes (no 0/O, 1/I), 32^4 ≈ 1M values.
+export const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+export const newTransferCode = () => Array.from({ length: 4 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
+// Does a free-text bank title contain the code? Tolerates typos in layout: spaces/dots/dashes between characters
+// ("A BC1", "123 A"), any lowercase, and arbitrary surrounding text. The code must not touch other letters or digits,
+// so "ABC12" or "XABC1" do not count. Works for legacy "BR-XXXXXXXXXXXX" codes as well.
+export function titleHasCode(title, code) {
+  const chars = [...String(code).toUpperCase().replace(/[^\p{L}\p{N}]/gu, '')];
+  if (!chars.length) return false;
+  const gap = '[\\s._-]*';
+  const pattern = `(?<![\\p{L}\\p{N}])${chars.join(gap)}(?![\\p{L}\\p{N}])`;
+  return new RegExp(pattern, 'u').test(String(title).toUpperCase());
+}
 export const notificationAddress = (user, config) => `${config.notificationPrefix || ''}${user.notification_alias}@${config.notificationDomain}`;
 export const categories = { zdrowie: 'Zdrowie', dzieci: 'Dzieci', zwierzeta: 'Zwierzęta', spolecznosc: 'Społeczność', edukacja: 'Edukacja', marzenia: 'Marzenia', pomoc: 'Pilna pomoc' };
 export const covers = ['community', 'nature', 'care', 'education', 'animals', 'dream'];

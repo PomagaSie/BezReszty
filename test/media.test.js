@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import { setup, addUser, addCampaign, login } from './helpers.js';
 import { sanitizeStory, textToHtml, plainText } from '../src/story.js';
 import { processImage, storeMedia, pruneMedia, MediaError } from '../src/media.js';
+import { importEditorialMedia } from '../src/editorial-media.js';
 
 const ID_A = 'a'.repeat(32), ID_B = 'b'.repeat(32);
 const photo = (width = 1200, height = 800) => sharp({ create: { width, height, channels: 3, background: '#3b82f6' } })
@@ -153,5 +154,36 @@ test('unused pictures are pruned after two days; pictures used as cover or insid
   db.prepare('UPDATE campaigns SET cover_media_id=?').run(cover);
   assert.equal(pruneMedia(db, owner.id), 1);
   assert.deepEqual(db.prepare('SELECT id FROM media ORDER BY id').all().map(row => row.id).sort(), [cover, inStory, fresh].sort());
+  db.close();
+});
+
+test('the Szkatułka Bajek screenshots become ordinary campaign pictures: once, without unpublishing, keeping a chosen cover', async () => {
+  const { app, db } = setup(); const owner = await addUser(db);
+  assert.equal(await importEditorialMedia(db), 'absent', 'installations without that campaign are untouched');
+  const campaign = addCampaign(db, owner, { slug: 'szkatulka-bajek-w-google-play', status: 'published', story: 'Pierwszy akapit opisu aplikacji.\n\nDrugi akapit, który ma sens.' });
+  const before = db.prepare('SELECT * FROM campaigns WHERE id=?').get(campaign.id);
+  assert.equal(await importEditorialMedia(db), 'imported');
+  const after = db.prepare('SELECT * FROM campaigns WHERE id=?').get(campaign.id);
+  assert.equal(after.status, 'published'); assert.equal(after.updated_at, before.updated_at); assert.equal(after.story_format, 'html');
+  const ids = [...after.story.matchAll(/\/media\/([0-9a-f]{32})/g)].map(match => match[1]);
+  assert.equal(ids.length, 4); assert.match(after.cover_media_id, /^[0-9a-f]{32}$/); assert.ok(!ids.includes(after.cover_media_id));
+  assert.match(after.story, /<p>Pierwszy akapit opisu aplikacji\.<\/p><p>Drugi akapit/); assert.match(after.story, /<h2>Zajrzyj do Szkatułki Bajek<\/h2>/); assert.match(after.story, /alt="Szkatułka Bajek — odtwarzacz i klucz snu"/);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM media WHERE owner_id=?').get(owner.id).n, 5);
+  const cover = await request(app).get(`/media/${after.cover_media_id}`);
+  assert.equal(cover.status, 200); const meta = await sharp(cover.body).metadata(); assert.ok(Math.abs(meta.width / meta.height - 1.7) < 0.05, 'cover keeps the 1.7:1 frame of the page');
+  const page = await request(app).get(`/zbiorka/${campaign.slug}`);
+  assert.match(page.text, new RegExp(`<img src="/media/${after.cover_media_id}"`)); assert.match(page.text, new RegExp(`<img src="/media/${ids[0]}"`)); assert.doesNotMatch(page.text, /campaign-screenshots|szkatulka-bajek\/home\.png/);
+  assert.equal(await importEditorialMedia(db), 'done'); assert.equal(db.prepare('SELECT COUNT(*) n FROM media').get().n, 5, 'a second start imports nothing');
+  const agent = request.agent(app), csrf = await login(agent, owner);
+  const editor = await agent.get(`/panel/zbiorki/${campaign.id}/edytuj`);
+  assert.match(editor.text, new RegExp(`name="cover" value="custom" checked`)); assert.match(editor.text, new RegExp(`name="cover_media_id" value="${after.cover_media_id}"`)); assert.match(editor.text, new RegExp(`/media/${ids[3]}`));
+  assert.ok(csrf);
+
+  const second = addCampaign(db, owner, { slug: 'szkatulka-bajek-w-google-play-2', status: 'published' });
+  db.prepare("DELETE FROM migrations").run(); db.prepare("UPDATE campaigns SET slug='x-old' WHERE id=?").run(campaign.id); db.prepare("UPDATE campaigns SET slug='szkatulka-bajek-w-google-play' WHERE id=?").run(second.id);
+  const own = storeMedia(db, owner.id, await processImage(await png())).id;
+  db.prepare('UPDATE campaigns SET cover_media_id=? WHERE id=?').run(own, second.id);
+  assert.equal(await importEditorialMedia(db), 'imported');
+  assert.equal(db.prepare('SELECT cover_media_id FROM campaigns WHERE id=?').get(second.id).cover_media_id, own, 'a cover the organizer already chose is kept');
   db.close();
 });

@@ -131,3 +131,6 @@
 
 .editor-layout>*{min-width:0}.story-editor{min-width:0;max-width:100%}
 @media(max-width:900px){.editor-layout{grid-template-columns:minmax(0,1fr)}}
+
+/* Tall pictures (e.g. phone screenshots) must not fill the whole screen */
+.rich img,.story-editor .ProseMirror img{max-height:620px;width:auto}

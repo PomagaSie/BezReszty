@@ -12,7 +12,6 @@ import { newTransferCode, notificationAddress, verificationCode, todayWarsaw, ca
 import { SqliteRateLimitStore } from './rate-limits.js';
 import { createMfaSecret, mfaTotp, encryptMfaSecret, decryptMfaSecret, mfaStep, consumeMfaCode, createRecoveryCodes } from './mfa.js';
 import { createMailer } from './email.js';
-import { campaignMedia } from './campaign-media.js';
 import { MEDIA_ID, MAX_UPLOAD_BYTES, UPLOAD_TYPES, MediaError, processImage, storeMedia, pruneMedia } from './media.js';
 import { sanitizeStory, textToHtml, STORY_MIN_TEXT, STORY_MAX_TEXT } from './story.js';
 import { authenticateBankMail, ingestAuthenticatedMail } from './bank.js';
@@ -84,7 +83,7 @@ export function createApp({ config, db, sendMail = createMailer(config, db) }) {
     const existing = req.cookies[csrfCookie];
     req.csrf = req.user?.csrf || req.mfaChallenge?.csrf || (/^[a-f0-9]{64}$/.test(existing || '') ? existing : token());
     if (!req.user && req.csrf !== existing) res.cookie(csrfCookie, req.csrf, cookieOptions);
-    res.locals = { asset, campaignMedia, storyHtml, user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode, notificationAddress };
+    res.locals = { asset, storyHtml, user: req.user, csrf: req.csrf, config, categories, covers, money, statuses, path: req.path, title: 'Zrzutki bez prowizji', error: null, notice: null, values: {}, verificationCode, notificationAddress };
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       if (req.get('origin') && req.get('origin') !== config.baseUrl) return res.status(403).render('error', { title: 'Niedozwolone żądanie', message: 'Otwórz formularz ponownie na tej stronie.' });
       if (!safeEqual(req.body?._csrf || req.get('x-csrf-token'), req.csrf)) return res.status(403).render('error', { title: 'Formularz wygasł', message: 'Odśwież stronę i spróbuj ponownie.' });

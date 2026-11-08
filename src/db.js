@@ -74,6 +74,7 @@ export function openDatabase(path) {
       PRIMARY KEY(user_id,hash)
     );
     CREATE INDEX IF NOT EXISTS mfa_enrollment_expiry ON mfa_enrollments(expires_at);
+    CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS media (
       id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       mime TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
